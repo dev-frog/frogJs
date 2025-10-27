@@ -1,10 +1,12 @@
 # Compiler and flags
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -Iinclude
+V8_PATH = /opt/homebrew/Cellar/v8/13.5.212.10
+LIBUV_PATH = /opt/homebrew/Cellar/libuv/1.51.0
+CXXFLAGS = -std=c++20 -Wall -Wextra -DV8_COMPRESS_POINTERS -DV8_ENABLE_SANDBOX -Iinclude -I$(V8_PATH)/include -I$(LIBUV_PATH)/include
 
 # Libraries
-V8_LIBS = -lv8 -lv8_libplatform -lv8_libbase
-LIBUV_LIBS = -luv
+V8_LIBS = -L$(V8_PATH)/lib -lv8 -lv8_libplatform
+LIBUV_LIBS = -L$(LIBUV_PATH)/lib -luv
 
 # Source and build directories
 SRC_DIR = src
