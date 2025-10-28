@@ -18,7 +18,8 @@ TARGET = $(BUILD_DIR)/frogjs
 # Source files
 SRCS = $(SRC_DIR)/core/runtime.cpp \
        $(SRC_DIR)/bindings/timers.cpp \
-       $(SRC_DIR)/bindings/fs.cpp
+       $(SRC_DIR)/bindings/fs.cpp \
+       $(SRC_DIR)/bindings/net.cpp
 
 # Object files
 OBJS = $(SRCS:.cpp=.o)

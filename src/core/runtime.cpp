@@ -13,6 +13,7 @@ using namespace v8;
 void SetupConsole(Isolate* isolate, Local<Context> context);
 void SetupTimers(Isolate* isolate, Local<Context> context);
 void SetupFileSystem(Isolate* isolate, Local<Context> context);
+void SetupNet(Isolate* isolate, Local<Context> context);
 
 // Read file contents into string
 std::string ReadFile(const char* filename) {
@@ -162,6 +163,7 @@ int main(int argc, char* argv[]) {
         SetupConsole(isolate, context);
         SetupTimers(isolate, context);
         SetupFileSystem(isolate, context);
+        SetupNet(isolate, context);
 
         // Read and execute the JavaScript file
         std::string code = ReadFile(argv[1]);
