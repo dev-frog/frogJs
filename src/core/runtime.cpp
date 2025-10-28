@@ -5,8 +5,14 @@
 #include <sstream>
 #include <v8.h>
 #include <libplatform/libplatform.h>
+#include <uv.h>
 
 using namespace v8;
+
+// Forward declarations for binding setup functions
+void SetupConsole(Isolate* isolate, Local<Context> context);
+void SetupTimers(Isolate* isolate, Local<Context> context);
+void SetupFileSystem(Isolate* isolate, Local<Context> context);
 
 // Read file contents into string
 std::string ReadFile(const char* filename) {
@@ -154,10 +160,18 @@ int main(int argc, char* argv[]) {
 
         // Set up built-in bindings
         SetupConsole(isolate, context);
+        SetupTimers(isolate, context);
+        SetupFileSystem(isolate, context);
 
         // Read and execute the JavaScript file
         std::string code = ReadFile(argv[1]);
         ExecuteScript(isolate, context, code, argv[1]);
+
+        // Run the event loop to handle async operations
+        while (uv_run(uv_default_loop(), UV_RUN_DEFAULT)) {
+            // Process V8 microtasks (Promises)
+            isolate->PerformMicrotaskCheckpoint();
+        }
     }
 
     // Dispose the isolate and tear down V8
@@ -165,6 +179,9 @@ int main(int argc, char* argv[]) {
     V8::Dispose();
     V8::DisposePlatform();
     delete create_params.array_buffer_allocator;
+
+    // Close the event loop
+    uv_loop_close(uv_default_loop());
 
     return 0;
 }

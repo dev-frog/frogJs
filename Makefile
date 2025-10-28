@@ -16,7 +16,9 @@ BUILD_DIR = build
 TARGET = $(BUILD_DIR)/frogjs
 
 # Source files
-SRCS = $(SRC_DIR)/core/runtime.cpp
+SRCS = $(SRC_DIR)/core/runtime.cpp \
+       $(SRC_DIR)/bindings/timers.cpp \
+       $(SRC_DIR)/bindings/fs.cpp
 
 # Object files
 OBJS = $(SRCS:.cpp=.o)
