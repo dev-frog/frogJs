@@ -9,6 +9,7 @@ struct ConnectionData {
     uv_tcp_t handle;
     Persistent<Object> jsSocket;
     Isolate* isolate;
+    bool closing;
 };
 
 // Structure to hold server data
@@ -64,11 +65,15 @@ void OnRead(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
             callback->Call(context, socket, 0, nullptr).IsEmpty();
         }
 
-        uv_close((uv_handle_t*)stream, [](uv_handle_t* handle) {
-            ConnectionData* conn = static_cast<ConnectionData*>(handle->data);
-            conn->jsSocket.Reset();
-            delete conn;
-        });
+        // Close handle if not already closing
+        if (!conn->closing) {
+            conn->closing = true;
+            uv_close((uv_handle_t*)stream, [](uv_handle_t* handle) {
+                ConnectionData* conn = static_cast<ConnectionData*>(handle->data);
+                conn->jsSocket.Reset();
+                delete conn;
+            });
+        }
     }
 
     if (buf->base) {
@@ -104,6 +109,11 @@ void SocketWrite(const FunctionCallbackInfo<Value>& args) {
             ConnectionData* conn = static_cast<ConnectionData*>(
                 Local<External>::Cast(handleVal)->Value());
 
+            // Don't write if the socket is closing
+            if (conn->closing) {
+                return;
+            }
+
             String::Utf8Value str(isolate, args[0]);
 
             uv_write_t* req = new uv_write_t;
@@ -134,11 +144,18 @@ void SocketEnd(const FunctionCallbackInfo<Value>& args) {
         if (handleVal->IsExternal()) {
             ConnectionData* conn = static_cast<ConnectionData*>(
                 Local<External>::Cast(handleVal)->Value());
-            uv_close((uv_handle_t*)&conn->handle, [](uv_handle_t* handle) {
-                ConnectionData* conn = static_cast<ConnectionData*>(handle->data);
-                conn->jsSocket.Reset();
-                delete conn;
-            });
+
+            // Close handle if not already closing
+            if (!conn->closing) {
+                conn->closing = true;
+                // Stop reading before closing
+                uv_read_stop((uv_stream_t*)&conn->handle);
+                uv_close((uv_handle_t*)&conn->handle, [](uv_handle_t* handle) {
+                    ConnectionData* conn = static_cast<ConnectionData*>(handle->data);
+                    conn->jsSocket.Reset();
+                    delete conn;
+                });
+            }
         }
     }
 }
@@ -205,6 +222,7 @@ void OnConnection(uv_stream_t* server, int status) {
     ConnectionData* conn = new ConnectionData;
     conn->isolate = isolate;
     conn->handle.data = conn;
+    conn->closing = false;
 
     uv_tcp_init(uv_default_loop(), &conn->handle);
 
@@ -372,11 +390,15 @@ void OnConnect(uv_connect_t* req, int status) {
             callback->Call(context, socket, 1, argv).IsEmpty();
         }
 
-        uv_close((uv_handle_t*)&conn->handle, [](uv_handle_t* handle) {
-            ConnectionData* conn = static_cast<ConnectionData*>(handle->data);
-            conn->jsSocket.Reset();
-            delete conn;
-        });
+        // Close handle if not already closing
+        if (!conn->closing) {
+            conn->closing = true;
+            uv_close((uv_handle_t*)&conn->handle, [](uv_handle_t* handle) {
+                ConnectionData* conn = static_cast<ConnectionData*>(handle->data);
+                conn->jsSocket.Reset();
+                delete conn;
+            });
+        }
     } else {
         // Connection successful
         Local<Value> onConnectKey = String::NewFromUtf8(isolate, "_onconnect").ToLocalChecked();
@@ -415,6 +437,7 @@ void NetConnect(const FunctionCallbackInfo<Value>& args) {
     ConnectionData* conn = new ConnectionData;
     conn->isolate = isolate;
     conn->handle.data = conn;
+    conn->closing = false;
 
     uv_tcp_init(uv_default_loop(), &conn->handle);
 
