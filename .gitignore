@@ -1,1 +1,26 @@
 .vscode
+
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# Object files
+src/**/*.o
+
+# IDE and editor files
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Dependency files
+*.d
+
+# Debug symbols
+*.dSYM/
+*.su
