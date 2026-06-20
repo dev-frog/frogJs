@@ -4,7 +4,7 @@
 
 ---
 
-## Features ✨
+## Features
 
 - **V8 JavaScript Engine**: Fast ECMAScript execution with modern JavaScript support
 - **Event-Driven I/O**: Non-blocking operations powered by libuv
@@ -16,7 +16,7 @@
 
 ---
 
-## Prerequisites 🛠️
+## Prerequisites
 
 Before building FrogJS, ensure you have the following dependencies:
 
@@ -38,7 +38,7 @@ sudo apt-get install libuv1-dev
 
 ---
 
-## Installation 📦
+## Installation
 
 ### Clone the Repository
 ```bash
@@ -63,7 +63,7 @@ make
 
 ---
 
-## Quick Start 🚀
+## Quick Start
 
 ### Hello World
 Create `hello.js`:
@@ -124,7 +124,7 @@ console.log(math.add(1, 2)); // 3
 
 ---
 
-## Examples 📚
+## Examples
 
 Check out the `examples/` directory for more samples:
 - `examples/timers.js` - Timer API usage
@@ -143,7 +143,7 @@ Run examples:
 
 ---
 
-## Project Structure 📁
+## Project Structure
 
 ```
 frogjs/
@@ -167,9 +167,9 @@ frogjs/
 
 ---
 
-## Current Status 🎯
+## Current Status
 
-### ✅ Implemented
+### Implemented
 - Core runtime with V8 integration
 - Console API (log, error)
 - Timer API (setTimeout, setInterval, etc.)
@@ -178,7 +178,7 @@ frogjs/
 - Module system (require, exports, caching)
 - Error handling with stack traces
 
-### ⏳ Planned
+### Planned
 - Process object (argv, env, exit, cwd)
 - Buffer class for binary data
 - Additional FS operations (mkdir, stat, readdir)
@@ -189,7 +189,7 @@ frogjs/
 
 ---
 
-## Documentation 📖
+## Documentation
 
 - **[FEATURES.md](FEATURES.md)** - Comprehensive feature documentation
 - **[note.md](note.md)** - Development guide and implementation notes
@@ -197,7 +197,7 @@ frogjs/
 
 ---
 
-## Building from Source 🔧
+## Building from Source
 
 ### Makefile Build (Recommended for macOS)
 ```bash
@@ -216,7 +216,7 @@ make
 
 ---
 
-## Performance 📊
+## Performance
 
 - **Startup Time**: ~50-100ms (V8 initialization)
 - **Memory Usage**: Minimal overhead
@@ -225,7 +225,7 @@ make
 
 ---
 
-## Contributing 🤝
+## Contributing
 
 Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
 
@@ -238,13 +238,13 @@ Contributions are welcome! Please feel free to submit pull requests or open issu
 
 ---
 
-## License 📜
+## License
 
 MIT License - See LICENSE file for details
 
 ---
 
-## Acknowledgments 🙏
+## Acknowledgments
 
 - **V8 Team** - For the amazing JavaScript engine
 - **libuv Team** - For the excellent I/O library
@@ -256,10 +256,10 @@ MIT License - See LICENSE file for details
 **Status**: Active Development
 **Last Updated**: 2025-10-28
 
-## License 📜
+## License
 
 _FrogJS_ is licensed under the MIT License. See the LICENSE file for more details.
 
 ## Support 🐸
 
-If you enjoy using FrogJS, consider giving it a ⭐ on GitHub! For questions or feedback, open an issue or reach out to us.
+If you enjoy using FrogJS, consider giving it a on GitHub! For questions or feedback, open an issue or reach out to us.
