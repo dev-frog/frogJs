@@ -11,6 +11,8 @@ using namespace v8;
 
 // Forward declarations for binding setup functions
 void SetupConsole(Isolate* isolate, Local<Context> context);
+void SetupProcess(Isolate* isolate, Local<Context> context, int argc, char* argv[]);
+void SetupBuffer(Isolate* isolate, Local<Context> context);
 void SetupTimers(Isolate* isolate, Local<Context> context);
 void SetupFileSystem(Isolate* isolate, Local<Context> context);
 void SetupNet(Isolate* isolate, Local<Context> context);
@@ -162,6 +164,8 @@ int main(int argc, char* argv[]) {
 
         // Set up built-in bindings
         SetupConsole(isolate, context);
+        SetupProcess(isolate, context, argc, argv);
+        SetupBuffer(isolate, context);
         SetupTimers(isolate, context);
         SetupFileSystem(isolate, context);
         SetupNet(isolate, context);

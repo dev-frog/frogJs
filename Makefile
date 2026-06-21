@@ -1,7 +1,7 @@
 # Compiler and flags
 CXX = g++
 V8_PATH = /opt/homebrew/Cellar/v8/13.5.212.10
-LIBUV_PATH = /opt/homebrew/Cellar/libuv/1.51.0
+LIBUV_PATH = /opt/homebrew/Cellar/libuv/1.52.1
 CXXFLAGS = -std=c++20 -Wall -Wextra -DV8_COMPRESS_POINTERS -DV8_ENABLE_SANDBOX -Iinclude -I$(V8_PATH)/include -I$(LIBUV_PATH)/include
 
 # Libraries
@@ -17,6 +17,8 @@ TARGET = $(BUILD_DIR)/frogjs
 
 # Source files
 SRCS = $(SRC_DIR)/core/runtime.cpp \
+       $(SRC_DIR)/bindings/process.cpp \
+       $(SRC_DIR)/bindings/buffer.cpp \
        $(SRC_DIR)/bindings/timers.cpp \
        $(SRC_DIR)/bindings/fs.cpp \
        $(SRC_DIR)/bindings/net.cpp \
