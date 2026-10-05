@@ -1,5 +1,9 @@
 # FrogJS 🐸
 
+[![Build](https://github.com/dev-frog/frogJs/actions/workflows/build.yml/badge.svg)](https://github.com/dev-frog/frogJs/actions/workflows/build.yml)
+[![Release](https://github.com/dev-frog/frogJs/actions/workflows/release.yml/badge.svg)](https://github.com/dev-frog/frogJs/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/dev-frog/frogJs?include_prereleases&sort=semver)](https://github.com/dev-frog/frogJs/releases/latest)
+
 **FrogJS** is a lightweight JavaScript runtime built on V8 and libuv, designed for server-side JavaScript development. Inspired by Node.js architecture, FrogJS provides a minimal yet powerful environment with CommonJS module support, TCP networking, file I/O, and asynchronous operations.
 
 ---
@@ -40,10 +44,26 @@ sudo apt-get install libuv1-dev
 
 ## Installation
 
+### Download a Prebuilt Release (macOS Apple Silicon)
+
+Prebuilt binaries are published on the [Releases page](https://github.com/dev-frog/frogJs/releases) for every version tag.
+
+```bash
+brew install v8 libuv   # runtime dependencies (linked dynamically)
+
+VERSION=0.3.0   # pick a version from the Releases page
+curl -LO https://github.com/dev-frog/frogJs/releases/download/v$VERSION/frogjs-$VERSION-macos-arm64.tar.gz
+curl -LO https://github.com/dev-frog/frogJs/releases/download/v$VERSION/frogjs-$VERSION-macos-arm64.tar.gz.sha256
+shasum -a 256 -c frogjs-$VERSION-macos-arm64.tar.gz.sha256
+
+tar -xzf frogjs-$VERSION-macos-arm64.tar.gz
+./frogjs-$VERSION-macos-arm64/frogjs your-script.js
+```
+
 ### Clone the Repository
 ```bash
-git clone https://github.com/your-username/frogjs.git
-cd frogjs
+git clone https://github.com/dev-frog/frogJs.git
+cd frogJs
 ```
 
 ### Build (macOS with Homebrew)
@@ -177,11 +197,12 @@ frogjs/
 - TCP server/client networking
 - Module system (require, exports, caching)
 - Error handling with stack traces
+- Process object (argv, env, exit, cwd, pid, platform)
+- Buffer class for binary data
+- Additional FS operations (mkdir, rmdir, stat, readdir, unlink, existsSync)
+- Automated release builds via GitHub Actions
 
 ### Planned
-- Process object (argv, env, exit, cwd)
-- Buffer class for binary data
-- Additional FS operations (mkdir, stat, readdir)
 - HTTP module
 - REPL mode
 - Worker threads
@@ -194,6 +215,7 @@ frogjs/
 - **[FEATURES.md](FEATURES.md)** - Comprehensive feature documentation
 - **[note.md](note.md)** - Development guide and implementation notes
 - **[steps.md](steps.md)** - Step-by-step implementation guide
+- **[RELEASE_GUIDE.md](RELEASE_GUIDE.md)** - How to cut a release
 
 ---
 
@@ -225,6 +247,30 @@ make
 
 ---
 
+## Releasing
+
+Releases are automated with GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml)).
+Each release builds FrogJS on macOS, runs a smoke test, and publishes a GitHub Release with the
+`.tar.gz` binary, a SHA-256 checksum, and notes generated from the commits since the previous tag.
+
+Start a release in either of these ways:
+
+```bash
+# 1. Push a tag (via the helper script or directly)
+./release.sh v0.3.0
+git tag -a v0.3.0 -m "Release v0.3.0" && git push origin v0.3.0
+
+# 2. Trigger from GitHub (the workflow creates the tag for you)
+gh workflow run release.yml -f version=v0.3.0
+#    or: Actions → Release → Run workflow
+```
+
+Versions with a suffix such as `v0.3.0-rc.1` are published as pre-releases.
+CI for pushes and pull requests runs separately in [`.github/workflows/build.yml`](.github/workflows/build.yml).
+See [RELEASE_GUIDE.md](RELEASE_GUIDE.md) for details.
+
+---
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
@@ -252,14 +298,10 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Version**: 0.1.0 (Development)
+**Version**: 0.2.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
 **Status**: Active Development
-**Last Updated**: 2025-10-28
-
-## License
-
-_FrogJS_ is licensed under the MIT License. See the LICENSE file for more details.
+**Last Updated**: 2026-10-06
 
 ## Support 🐸
 
-If you enjoy using FrogJS, consider giving it a on GitHub! For questions or feedback, open an issue or reach out to us.
+If you enjoy using FrogJS, consider giving it a ⭐ on GitHub! For questions or feedback, open an issue or reach out to us.

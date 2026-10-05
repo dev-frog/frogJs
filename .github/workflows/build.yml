@@ -3,8 +3,6 @@ name: Build FrogJS
 on:
   push:
     branches: [ main, develop ]
-    tags:
-      - 'v*.*.*'
   pull_request:
     branches: [ main, develop ]
   workflow_dispatch:
@@ -15,7 +13,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
@@ -54,66 +52,22 @@ jobs:
       if: success()
       run: |
         echo "Testing FrogJS basic functionality..."
-        ./build/frogjs --version || echo "Version flag not implemented yet"
+        ./build/frogjs examples/hello.js
 
     - name: Upload build artifact
       if: success()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: frogjs-macos
         path: build/frogjs
         retention-days: 90
-
-    - name: Get version from tag
-      if: startsWith(github.ref, 'refs/tags/')
-      id: get-version
-      run: |
-        VERSION=${GITHUB_REF#refs/tags/v}
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "Release version: $VERSION"
-
-    - name: Create release archive
-      if: startsWith(github.ref, 'refs/tags/')
-      run: |
-        cd build
-        tar -czf frogjs-macos-x64.tar.gz frogjs
-        ls -lh frogjs-macos-x64.tar.gz
-
-    - name: Create GitHub Release
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
-      with:
-        files: build/frogjs-macos-x64.tar.gz
-        draft: false
-        prerelease: false
-        generate_release_notes: true
-        body: |
-          ## FrogJS ${{ steps.get-version.outputs.version }}
-
-          ### 📦 Downloads
-          - **macOS (x64)**: frogjs-macos-x64.tar.gz
-
-          ### 🚀 Features
-          - JavaScript runtime built with V8 and libuv
-          - HTTP server, TCP server/client
-          - File system operations
-          - Timers and async operations
-          - Module system
-
-          ### 📋 Requirements
-          - macOS with Homebrew-installed V8 and libuv
-          - Or manually update Makefile paths for your system
-
-          Built from commit: ${{ github.sha }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-ubuntu:
     runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install build tools
       run: |
@@ -174,95 +128,3 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "**Note:** V8 dependency complexity may limit cross-platform CI." >> $GITHUB_STEP_SUMMARY
         echo "macOS builds are most reliable due to Homebrew V8 availability." >> $GITHUB_STEP_SUMMARY
-
-  create-release:
-    runs-on: ubuntu-latest
-    needs: [build-macos]
-    if: startsWith(github.ref, 'refs/tags/v')
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Download macOS artifact
-      uses: actions/download-artifact@v3
-      with:
-        name: frogjs-macos
-        path: ./artifacts/macos
-
-    - name: Get version from tag
-      id: get-version
-      run: |
-        VERSION=${GITHUB_REF#refs/tags/v}
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "Release version: $VERSION"
-
-    - name: Create release archives
-      run: |
-        chmod +x ./artifacts/macos/frogjs
-        cd artifacts
-        tar -czf frogjs-${{ steps.get-version.outputs.version }}-macos-x64.tar.gz -C macos frogjs
-        ls -lh frogjs-${{ steps.get-version.outputs.version }}-macos-x64.tar.gz
-
-    - name: Generate release notes
-      id: release-notes
-      run: |
-        cat > release_notes.md << 'EOF'
-        ## FrogJS ${{ steps.get-version.outputs.version }}
-
-        ### 📦 Available Downloads
-        - **macOS (x64)**: frogjs-${{ steps.get-version.outputs.version }}-macos-x64.tar.gz
-
-        ### 🚀 Features
-        - JavaScript runtime built with V8 and libuv
-        - HTTP server with request/response handling
-        - TCP server and TCP client
-        - File system operations (read, write, stat)
-        - Timers (setTimeout, setInterval)
-        - Async module system
-        - Event-driven architecture
-
-        ### 📋 Installation
-        ```bash
-        # Download and extract
-        tar -xzf frogjs-${{ steps.get-version.outputs.version }}-macos-x64.tar.gz
-
-        # Install dependencies (macOS)
-        brew install v8 libuv
-
-        # Run FrogJS
-        ./frogjs
-        ```
-
-        ### 🔧 Build Requirements
-        - C++20 compatible compiler
-        - V8 JavaScript engine
-        - libuv for async I/O
-        - macOS (via Homebrew) or Linux with manual configuration
-
-        ### 📝 Changes in this release
-        Built from commit: ${{ github.sha }}
-        EOF
-
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ github.ref_name }}
-        name: FrogJS ${{ steps.get-version.outputs.version }}
-        files: artifacts/frogjs-${{ steps.get-version.outputs.version }}-macos-x64.tar.gz
-        body_path: release_notes.md
-        draft: false
-        prerelease: false
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Release summary
-      run: |
-        echo "## ✅ Release Created Successfully!" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Version:** ${{ steps.get-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "Download from: [Releases page](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }})" >> $GITHUB_STEP_SUMMARY

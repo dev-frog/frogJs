@@ -16,6 +16,16 @@ chmod +x release.sh
 ./release.sh -n v1.0.0
 ```
 
+## Release from GitHub (no local script)
+
+You can also cut a release from the **Actions → Release → Run workflow** button
+(or `gh workflow run release.yml -f version=v0.3.0`). The workflow creates the tag
+on the selected branch, builds, and publishes the release.
+
+Versions with a suffix (e.g. `v0.3.0-rc.1`) are published as pre-releases.
+
+The release workflow lives in `.github/workflows/release.yml`; `build.yml` only runs CI.
+
 ## Features
 
 - ✅ Validates git status (no uncommitted changes)
