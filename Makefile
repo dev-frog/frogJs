@@ -22,6 +22,8 @@ SRCS = $(SRC_DIR)/core/runtime.cpp \
        $(SRC_DIR)/bindings/timers.cpp \
        $(SRC_DIR)/bindings/fs.cpp \
        $(SRC_DIR)/bindings/net.cpp \
+       $(SRC_DIR)/bindings/path.cpp \
+       $(SRC_DIR)/bindings/os.cpp \
        $(SRC_DIR)/bindings/modules.cpp
 
 # Object files

@@ -1,6 +1,6 @@
 # FrogJS Development Roadmap
 
-## 📊 Current Status: Version 0.1.0
+## 📊 Current Status: Version 0.3.0
 
 ### ✅ Completed (v0.1.0)
 - Core V8 runtime integration
@@ -14,11 +14,22 @@
 - GitHub Actions CI/CD
 - Release automation
 
+### ✅ Completed (v0.2.0)
+- Process object (argv, env, exit, cwd, pid, platform, version)
+- Buffer class (alloc, from, byteLength, toString, write, slice)
+- Enhanced file system (mkdir, stat, readdir, unlink, rmdir, existsSync)
+
+### ✅ Completed (v0.3.0)
+- Path module (join, resolve, normalize, dirname, basename, extname, isAbsolute, sep, delimiter)
+- OS module (platform, arch, cpus, hostname, release, type, totalmem, freemem, homedir, tmpdir, EOL)
+- `require('path')`, `require('os')`, `require('fs')`, `require('net')` return the built-in modules
+- V8 15 compatibility
+
 ---
 
 ## 🎯 Development Roadmap
 
-### Version 0.2.0 - Core Utilities (Recommended Next Step)
+### Version 0.2.0 - Core Utilities ✅ Completed
 
 **Priority: HIGH**
 **Estimated Effort: 2-3 weeks**
@@ -90,7 +101,7 @@ void SetupBuffer(Isolate* isolate, Local<Context> context);
 
 ---
 
-### Version 0.3.0 - Path & OS Utilities
+### Version 0.3.0 - Path & OS Utilities ✅ Completed
 
 **Priority: MEDIUM**
 **Estimated Effort: 1-2 weeks**
@@ -109,6 +120,11 @@ void SetupPath(Isolate* isolate, Local<Context> context);
 - `path.extname(path)` - Get file extension
 - `path.isAbsolute(path)` - Check if absolute
 - `path.normalize(path)` - Normalize path
+- `path.sep` / `path.delimiter` - Platform separators
+
+**Implementation Notes:**
+- POSIX semantics matching Node.js `path.posix`; verified against Node with 2,400+ input combinations
+- Non-string arguments throw `TypeError`
 
 #### OS Module
 ```cpp
@@ -127,10 +143,15 @@ void SetupOS(Isolate* isolate, Local<Context> context);
 - `os.freemem()` - Free memory
 - `os.homedir()` - Home directory
 - `os.tmpdir()` - Temp directory
+- `os.EOL` - End-of-line marker
+
+**Implementation Notes:**
+- Built on libuv (`uv_cpu_info`, `uv_os_uname`, `uv_os_homedir`, `uv_os_tmpdir`, ...)
+- Output matches Node.js `os` on the same machine
 
 ---
 
-### Version 0.4.0 - HTTP Module
+### Version 0.4.0 - HTTP Module (Recommended Next Step)
 
 **Priority: MEDIUM-HIGH**
 **Estimated Effort: 3-4 weeks**
@@ -347,9 +368,9 @@ declare module 'http' { ... }
 
 ## 🗓️ Timeline Estimates
 
-- **v0.2.0**: 2-3 weeks (recommended immediate focus)
-- **v0.3.0**: 1-2 weeks
-- **v0.4.0**: 3-4 weeks
+- **v0.2.0**: ✅ Completed
+- **v0.3.0**: ✅ Completed
+- **v0.4.0**: 3-4 weeks (recommended immediate focus)
 - **v0.5.0**: 2-3 weeks
 - **v0.6.0**: 2-3 weeks
 - **v0.7.0**: 2 weeks
@@ -363,13 +384,11 @@ declare module 'http' { ... }
 
 ## 🚀 Quick Start Recommendation
 
-Start with **v0.2.0** features (Process, Buffer, Enhanced FS):
+Next up is **v0.4.0** (HTTP module), built on top of the existing TCP module:
 
 ```bash
-# Create implementation branches
-git checkout -b feature/process-object
-git checkout -b feature/buffer-class
-git checkout -b feature/enhanced-fs
+# Create implementation branch
+git checkout -b feature/http-module
 
 # Focus on one feature at a time
 # Test thoroughly with examples

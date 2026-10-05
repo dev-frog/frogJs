@@ -16,6 +16,8 @@ void SetupBuffer(Isolate* isolate, Local<Context> context);
 void SetupTimers(Isolate* isolate, Local<Context> context);
 void SetupFileSystem(Isolate* isolate, Local<Context> context);
 void SetupNet(Isolate* isolate, Local<Context> context);
+void SetupPath(Isolate* isolate, Local<Context> context);
+void SetupOS(Isolate* isolate, Local<Context> context);
 void SetupModules(Isolate* isolate, Local<Context> context, const std::string& mainFilePath);
 
 // Read file contents into string
@@ -169,6 +171,8 @@ int main(int argc, char* argv[]) {
         SetupTimers(isolate, context);
         SetupFileSystem(isolate, context);
         SetupNet(isolate, context);
+        SetupPath(isolate, context);
+        SetupOS(isolate, context);
         SetupModules(isolate, context, argv[1]);
 
         // Read and execute the JavaScript file

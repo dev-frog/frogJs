@@ -16,6 +16,8 @@
 - **TCP Networking**: Built-in TCP server and client functionality
 - **File System**: Both sync and async file operations
 - **Timer API**: setTimeout, setInterval, clearTimeout, clearInterval
+- **Process & Buffer**: `process` object and `Buffer` class for binary data
+- **Path & OS Utilities**: Node-compatible `path` and `os` modules
 - **Clean Architecture**: Minimal C++ codebase with clear separation of concerns
 
 ---
@@ -153,6 +155,8 @@ Check out the `examples/` directory for more samples:
 - `examples/tcp-server.js` - TCP server implementation
 - `examples/tcp-client.js` - TCP client implementation
 - `examples/modules/` - Module system examples
+- `examples/test-path.js` - Path module usage
+- `examples/test-os.js` - OS module usage
 
 Run examples:
 ```bash
@@ -171,9 +175,13 @@ frogjs/
 │   ├── core/
 │   │   └── runtime.cpp       # Main entry point
 │   └── bindings/
-│       ├── timers.cpp        # Timer API
+│       ├── process.cpp      # process object
+│       ├── buffer.cpp       # Buffer class
+│       ├── timers.cpp       # Timer API
 │       ├── fs.cpp           # File system API
 │       ├── net.cpp          # TCP networking
+│       ├── path.cpp         # Path utilities
+│       ├── os.cpp           # OS information
 │       └── modules.cpp      # Module system
 ├── examples/                # Example scripts
 ├── docs/                    # Documentation
@@ -200,6 +208,8 @@ frogjs/
 - Process object (argv, env, exit, cwd, pid, platform)
 - Buffer class for binary data
 - Additional FS operations (mkdir, rmdir, stat, readdir, unlink, existsSync)
+- Path module (join, resolve, normalize, dirname, basename, extname, isAbsolute)
+- OS module (platform, arch, cpus, hostname, release, type, totalmem, freemem, homedir, tmpdir)
 - Automated release builds via GitHub Actions
 
 ### Planned
@@ -298,7 +308,7 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Version**: 0.2.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
+**Version**: 0.3.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
 **Status**: Active Development
 **Last Updated**: 2026-10-06
 

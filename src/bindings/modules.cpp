@@ -96,8 +96,19 @@ void Require(const FunctionCallbackInfo<Value>& args) {
     String::Utf8Value pathArg(isolate, args[0]);
     std::string requestedPath(*pathArg);
 
-    // Get the caller's __dirname to resolve relative paths
     Local<Object> global = context->Global();
+
+    // Built-in modules are exposed as globals; require() returns the same object
+    static const char* builtinModules[] = {"fs", "net", "path", "os"};
+    for (const char* name : builtinModules) {
+        if (requestedPath == name) {
+            args.GetReturnValue().Set(global->Get(context,
+                String::NewFromUtf8(isolate, name).ToLocalChecked()).ToLocalChecked());
+            return;
+        }
+    }
+
+    // Get the caller's __dirname to resolve relative paths
     Local<Value> dirnameVal = global->Get(context,
         String::NewFromUtf8(isolate, "__dirname").ToLocalChecked()).ToLocalChecked();
 
@@ -112,7 +123,8 @@ void Require(const FunctionCallbackInfo<Value>& args) {
 
     if (filepath.empty()) {
         std::string error = "Cannot find module '" + requestedPath + "'";
-        isolate->ThrowException(String::NewFromUtf8(isolate, error.c_str()).ToLocalChecked());
+        isolate->ThrowException(Exception::Error(
+            String::NewFromUtf8(isolate, error.c_str()).ToLocalChecked()));
         return;
     }
 

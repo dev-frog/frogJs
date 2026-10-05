@@ -168,7 +168,7 @@ void SetupProcess(Isolate* isolate, Local<Context> context, int argc, char* argv
     process->Set(
         context,
         String::NewFromUtf8(isolate, "version").ToLocalChecked(),
-        String::NewFromUtf8(isolate, "v0.2.0").ToLocalChecked()
+        String::NewFromUtf8(isolate, "v0.3.0").ToLocalChecked()
     ).Check();
 
     // Store persistent reference

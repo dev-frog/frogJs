@@ -49,6 +49,26 @@ FrogJS is a lightweight JavaScript runtime built on V8 and libuv, providing Node
 - **Relative Paths**: Support for `./` and `../` imports
 - **Index Files**: Automatic `index.js` resolution
 - **File Extension Resolution**: `.js` extension auto-detection
+- **Built-in Modules**: `require('fs')`, `require('net')`, `require('path')`, `require('os')`
+
+### 7. Path API
+POSIX path utilities matching Node.js `path.posix` (available as global `path` or `require('path')`)
+- `path.join(...paths)` - Join and normalize path segments
+- `path.resolve(...paths)` - Resolve to an absolute path (relative to `process.cwd()`)
+- `path.normalize(path)` - Resolve `.`/`..` segments and duplicate slashes
+- `path.dirname(path)` - Directory portion of a path
+- `path.basename(path[, ext])` - Last portion of a path, optionally without `ext`
+- `path.extname(path)` - File extension (e.g. `.js`)
+- `path.isAbsolute(path)` - Whether a path is absolute
+- `path.sep` (`/`) and `path.delimiter` (`:`)
+
+### 8. OS API
+Operating system information via libuv (available as global `os` or `require('os')`)
+- `os.platform()` / `os.type()` / `os.release()` / `os.arch()`
+- `os.cpus()` - Array of `{ model, speed, times: { user, nice, sys, idle, irq } }`
+- `os.hostname()` / `os.homedir()` / `os.tmpdir()`
+- `os.totalmem()` / `os.freemem()` - Memory in bytes
+- `os.EOL` - End-of-line marker (`\n`)
 
 ## 📖 Usage Examples
 
@@ -135,6 +155,23 @@ const math = require('./math');
 console.log(math.add(1, 2)); // 3
 ```
 
+### Path
+```javascript
+const path = require('path');
+path.join('/foo', 'bar', '../baz');      // '/foo/baz'
+path.resolve('src', 'index.js');         // '<cwd>/src/index.js'
+path.basename('/a/b/file.js', '.js');    // 'file'
+path.extname('archive.tar.gz');          // '.gz'
+```
+
+### OS
+```javascript
+const os = require('os');
+console.log(`${os.type()} ${os.release()} (${os.arch()})`);
+console.log(`${os.cpus().length} CPUs, ${Math.round(os.totalmem() / 1024 ** 3)} GB RAM`);
+console.log('Home:', os.homedir());
+```
+
 ## 🏗️ Architecture
 
 ### Core Components
@@ -157,14 +194,16 @@ console.log(math.add(1, 2)); // 3
 - TCP server/client
 - Module system with caching
 - Error handling with stack traces
+- Process object (argv, env, exit, cwd, pid, platform, version)
+- Buffer class for binary data
+- Additional FS operations (mkdir, rmdir, stat, readdir, unlink, existsSync)
+- Path module
+- OS module
 
 ### In Progress 🔨
 - None currently
 
 ### Planned Features ⏳
-- Process object (argv, env, exit, cwd)
-- Buffer class for binary data
-- Additional FS operations (mkdir, stat, readdir)
 - HTTP module
 - REPL mode
 - Worker threads
@@ -191,6 +230,10 @@ Run example scripts to test features:
 
 # Modules
 ./build/frogjs examples/modules/main.js
+
+# Path & OS
+./build/frogjs examples/test-path.js
+./build/frogjs examples/test-os.js
 ```
 
 ## 📊 Performance
