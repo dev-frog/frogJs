@@ -2,7 +2,7 @@
 CXX = g++
 V8_PATH = /opt/homebrew/Cellar/v8/13.5.212.10
 LIBUV_PATH = /opt/homebrew/Cellar/libuv/1.52.1
-CXXFLAGS = -std=c++20 -Wall -Wextra -DV8_COMPRESS_POINTERS -DV8_ENABLE_SANDBOX -Iinclude -I$(V8_PATH)/include -I$(LIBUV_PATH)/include
+CXXFLAGS = -std=c++20 -Wall -Wextra -DV8_COMPRESS_POINTERS -DV8_ENABLE_SANDBOX -Iinclude -isystem $(V8_PATH)/include -I$(LIBUV_PATH)/include
 
 # Libraries
 V8_LIBS = -L$(V8_PATH)/lib -lv8 -lv8_libplatform

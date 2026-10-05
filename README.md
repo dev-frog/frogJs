@@ -1,4 +1,4 @@
-# FrogJS 🐸
+![FrogJS Logo](assets/frogjs2.png)
 
 [![Build](https://github.com/dev-frog/frogJs/actions/workflows/build.yml/badge.svg)](https://github.com/dev-frog/frogJs/actions/workflows/build.yml)
 [![Release](https://github.com/dev-frog/frogJs/actions/workflows/release.yml/badge.svg)](https://github.com/dev-frog/frogJs/actions/workflows/release.yml)

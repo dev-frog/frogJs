@@ -1,4 +1,5 @@
 #include <v8.h>
+#include "frogjs/v8_compat.h"
 #include <uv.h>
 #include <string>
 
@@ -106,8 +107,7 @@ void SocketWrite(const FunctionCallbackInfo<Value>& args) {
     if (!handleData.IsEmpty()) {
         Local<Value> handleVal = handleData.As<Value>();
         if (handleVal->IsExternal()) {
-            ConnectionData* conn = static_cast<ConnectionData*>(
-                Local<External>::Cast(handleVal)->Value());
+            ConnectionData* conn = frogjs::ExternalValue<ConnectionData>(handleVal);
 
             // Don't write if the socket is closing
             if (conn->closing) {
@@ -142,8 +142,7 @@ void SocketEnd(const FunctionCallbackInfo<Value>& args) {
     if (!handleData.IsEmpty()) {
         Local<Value> handleVal = handleData.As<Value>();
         if (handleVal->IsExternal()) {
-            ConnectionData* conn = static_cast<ConnectionData*>(
-                Local<External>::Cast(handleVal)->Value());
+            ConnectionData* conn = frogjs::ExternalValue<ConnectionData>(handleVal);
 
             // Close handle if not already closing
             if (!conn->closing) {
@@ -189,7 +188,7 @@ Local<Object> CreateSocket(Isolate* isolate, Local<Context> context, ConnectionD
     socketTemplate->SetInternalFieldCount(1);
 
     Local<Object> socket = socketTemplate->NewInstance(context).ToLocalChecked();
-    socket->SetInternalField(0, External::New(isolate, conn));
+    socket->SetInternalField(0, frogjs::NewExternal(isolate, conn));
 
     // Add methods
     socket->Set(context, String::NewFromUtf8(isolate, "write").ToLocalChecked(),
@@ -279,8 +278,7 @@ void ServerListen(const FunctionCallbackInfo<Value>& args) {
         return;
     }
 
-    ServerData* serverData = static_cast<ServerData*>(
-        Local<External>::Cast(handleVal)->Value());
+    ServerData* serverData = frogjs::ExternalValue<ServerData>(handleVal);
 
     int port = args[0]->Int32Value(context).ToChecked();
     Local<Function> callback = args.Length() > 1 && args[1]->IsFunction()
@@ -318,8 +316,7 @@ void ServerClose(const FunctionCallbackInfo<Value>& args) {
     if (!handleData.IsEmpty()) {
         Local<Value> handleVal = handleData.As<Value>();
         if (handleVal->IsExternal()) {
-            ServerData* serverData = static_cast<ServerData*>(
-                Local<External>::Cast(handleVal)->Value());
+            ServerData* serverData = frogjs::ExternalValue<ServerData>(handleVal);
 
             uv_close((uv_handle_t*)&serverData->handle, [](uv_handle_t* handle) {
                 ServerData* serverData = static_cast<ServerData*>(handle->data);
@@ -355,7 +352,7 @@ void CreateServer(const FunctionCallbackInfo<Value>& args) {
     serverTemplate->SetInternalFieldCount(1);
 
     Local<Object> server = serverTemplate->NewInstance(context).ToLocalChecked();
-    server->SetInternalField(0, External::New(isolate, serverData));
+    server->SetInternalField(0, frogjs::NewExternal(isolate, serverData));
 
     // Add methods
     server->Set(context, String::NewFromUtf8(isolate, "listen").ToLocalChecked(),

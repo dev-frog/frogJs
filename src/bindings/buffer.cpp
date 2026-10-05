@@ -1,4 +1,5 @@
 #include <v8.h>
+#include "frogjs/v8_compat.h"
 #include <cstring>
 #include <algorithm>
 
@@ -17,8 +18,7 @@ static const int BUFFER_LENGTH_FIELD = 1;
 
 // Get internal BufferData from object
 BufferData* GetBufferData(Local<Object> buffer_obj) {
-    Local<External> field = Local<External>::Cast(buffer_obj->GetInternalField(BUFFER_DATA_FIELD));
-    return static_cast<BufferData*>(field->Value());
+    return frogjs::ExternalValue<BufferData>(buffer_obj->GetInternalField(BUFFER_DATA_FIELD).As<Value>());
 }
 
 // Buffer constructor callback
@@ -48,7 +48,7 @@ void BufferConstructor(const FunctionCallbackInfo<Value>& args) {
         BufferData* buffer_data = new BufferData{data, length, owns_data};
 
         // Set internal fields
-        buffer_obj->SetInternalField(BUFFER_DATA_FIELD, External::New(isolate, buffer_data));
+        buffer_obj->SetInternalField(BUFFER_DATA_FIELD, frogjs::NewExternal(isolate, buffer_data));
         buffer_obj->SetInternalField(BUFFER_LENGTH_FIELD, Integer::New(isolate, length));
 
         // Set length property on the instance
@@ -161,7 +161,7 @@ void BufferFrom(const FunctionCallbackInfo<Value>& args) {
 
     // Set new data
     BufferData* buffer_data = new BufferData{data, length, true};
-    buffer_obj->SetInternalField(BUFFER_DATA_FIELD, External::New(isolate, buffer_data));
+    buffer_obj->SetInternalField(BUFFER_DATA_FIELD, frogjs::NewExternal(isolate, buffer_data));
     buffer_obj->SetInternalField(BUFFER_LENGTH_FIELD, Integer::New(isolate, length));
 
     // Update length property on the instance
@@ -317,7 +317,7 @@ void BufferSlice(const FunctionCallbackInfo<Value>& args) {
         slice_length,
         false  // Doesn't own data - original buffer owns it
     };
-    slice_obj->SetInternalField(BUFFER_DATA_FIELD, External::New(isolate, slice_data));
+    slice_obj->SetInternalField(BUFFER_DATA_FIELD, frogjs::NewExternal(isolate, slice_data));
     slice_obj->SetInternalField(BUFFER_LENGTH_FIELD, Integer::New(isolate, slice_length));
 
     // Update length property on the slice instance
@@ -328,21 +328,6 @@ void BufferSlice(const FunctionCallbackInfo<Value>& args) {
     ).Check();
 
     args.GetReturnValue().Set(slice_obj);
-}
-
-// buf.length getter
-void BufferLengthGetter(Local<Name> property, const PropertyCallbackInfo<Value>& info) {
-    Isolate* isolate = info.GetIsolate();
-    HandleScope handle_scope(isolate);
-
-    Local<Object> buffer_obj = info.This().As<Object>();
-    BufferData* buffer_data = GetBufferData(buffer_obj);
-
-    if (buffer_data != nullptr) {
-        info.GetReturnValue().Set(static_cast<int>(buffer_data->length));
-    } else {
-        info.GetReturnValue().Set(0);
-    }
 }
 
 // Buffer finalizer - cleanup data when buffer is garbage collected
