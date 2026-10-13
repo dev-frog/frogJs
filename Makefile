@@ -2,7 +2,16 @@
 CXX = g++
 V8_PATH = /opt/homebrew/Cellar/v8/13.5.212.10
 LIBUV_PATH = /opt/homebrew/Cellar/libuv/1.52.1
-CXXFLAGS = -std=c++20 -Wall -Wextra -DV8_COMPRESS_POINTERS -DV8_ENABLE_SANDBOX -Iinclude -isystem $(V8_PATH)/include -I$(LIBUV_PATH)/include
+# V8 aborts at startup if these defines don't match how libv8 was built.
+# Homebrew enabled the sandbox up to V8 13.x but disables it from 15.x,
+# so detect it from the library's symbols (override with V8_SANDBOX=0/1).
+V8_SANDBOX ?= $(shell nm -gU $(V8_PATH)/lib/libv8.dylib 2>/dev/null | c++filt | grep -q 'v8::internal::Sandbox::' && echo 1 || echo 0)
+V8_DEFINES = -DV8_COMPRESS_POINTERS
+ifeq ($(V8_SANDBOX),1)
+V8_DEFINES += -DV8_ENABLE_SANDBOX
+endif
+
+CXXFLAGS = -std=c++20 -Wall -Wextra $(V8_DEFINES) -Iinclude -isystem $(V8_PATH)/include -I$(LIBUV_PATH)/include
 
 # Libraries
 V8_LIBS = -L$(V8_PATH)/lib -lv8 -lv8_libplatform
