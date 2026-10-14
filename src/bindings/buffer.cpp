@@ -1,20 +1,25 @@
 #include <v8.h>
 #include "frogjs/v8_compat.h"
+#include "frogjs/buffer.h"
 #include <cstring>
 #include <algorithm>
 
 using namespace v8;
 
-// Structure to hold Buffer data
-struct BufferData {
-    char* data;           // Raw byte array
-    size_t length;        // Buffer length
-    bool owns_data;       // Free on destructor if true
-};
-
 // Constants for Buffer
 static const int BUFFER_DATA_FIELD = 0;
 static const int BUFFER_LENGTH_FIELD = 1;
+
+// Template behind the Buffer constructor, used by IsBuffer()
+static Persistent<FunctionTemplate> g_buffer_template;
+
+bool IsBuffer(Local<Value> value) {
+    if (g_buffer_template.IsEmpty() || !value->IsObject()) {
+        return false;
+    }
+    Isolate* isolate = Isolate::GetCurrent();
+    return Local<FunctionTemplate>::New(isolate, g_buffer_template)->HasInstance(value);
+}
 
 // Get internal BufferData from object
 BufferData* GetBufferData(Local<Object> buffer_obj) {
@@ -343,6 +348,7 @@ void SetupBuffer(Isolate* isolate, Local<Context> context) {
     Local<FunctionTemplate> buffer_tpl = FunctionTemplate::New(isolate, BufferConstructor);
     buffer_tpl->SetClassName(String::NewFromUtf8(isolate, "Buffer").ToLocalChecked());
     buffer_tpl->InstanceTemplate()->SetInternalFieldCount(2);
+    g_buffer_template.Reset(isolate, buffer_tpl);
 
     // Add instance methods
     Local<ObjectTemplate> instance_tpl = buffer_tpl->InstanceTemplate();

@@ -38,10 +38,16 @@ FrogJS is a lightweight JavaScript runtime built on V8 and libuv, providing Node
   - `server.listen(port, callback)` - Start listening
   - `server.close()` - Close server
 
-- **TCP Client**: `net.connect(port, host)`
-  - `socket.write(data)` - Write data
-  - `socket.end()` - Close connection
-  - `socket.on(event, callback)` - Event handling
+  - `server.address()` - `{ address, family, port }` (useful after `listen(0)`)
+  - `net.createServer({ allowHalfOpen: true }, callback)` - Keep writing after the peer ends
+
+- **TCP Client**: `net.connect(port[, host][, callback])` - Resolves hostnames (DNS), IPv4 and IPv6
+  - `socket.write(data[, encoding])` - Write a string or Buffer (`'latin1'` writes raw bytes)
+  - `socket.end([data])` - Flush pending writes, then close
+  - `socket.destroy()` - Close immediately
+  - `socket.setEncoding('latin1')` - Receive data as byte strings
+  - `socket.on(event, callback)` - `connect`, `data`, `end`, `error`, `close`
+  - `socket.remoteAddress` / `socket.remotePort`
 
 ### 6. Module System
 - **CommonJS Support**: `require()` and `module.exports`
@@ -49,7 +55,7 @@ FrogJS is a lightweight JavaScript runtime built on V8 and libuv, providing Node
 - **Relative Paths**: Support for `./` and `../` imports
 - **Index Files**: Automatic `index.js` resolution
 - **File Extension Resolution**: `.js` extension auto-detection
-- **Built-in Modules**: `require('fs')`, `require('net')`, `require('path')`, `require('os')`
+- **Built-in Modules**: `require('fs')`, `require('net')`, `require('http')`, `require('path')`, `require('os')`
 
 ### 7. Path API
 POSIX path utilities matching Node.js `path.posix` (available as global `path` or `require('path')`)
@@ -69,6 +75,38 @@ Operating system information via libuv (available as global `os` or `require('os
 - `os.hostname()` / `os.homedir()` / `os.tmpdir()`
 - `os.totalmem()` / `os.freemem()` - Memory in bytes
 - `os.EOL` - End-of-line marker (`\n`)
+
+### 9. HTTP API
+HTTP/1.1 server and client (available as global `http` or `require('http')`), written in JavaScript on top of the TCP module
+- **Server**: `http.createServer([options][, requestListener])`
+  - `server.listen([port][, host][, callback])`, `server.close([callback])`, `server.address()`
+  - `server.closeIdleConnections()`, `server.closeAllConnections()`
+  - `server.keepAliveTimeout` (5s), `server.headersTimeout` (60s)
+  - Events: `request`, `listening`, `connection`, `close`, `error`, `clientError`, `checkContinue`
+- **IncomingMessage** (`req` on the server, `res` on the client)
+  - `method`, `url`, `statusCode`, `statusMessage`, `headers` (lower-cased), `rawHeaders`, `trailers`, `httpVersion`, `socket`
+  - Events: `data` (UTF-8 strings; `setEncoding('latin1')` for raw bytes), `end`, `aborted`, `close`
+  - Body chunks are buffered until a `data` listener is attached or `resume()` is called
+- **ServerResponse**
+  - `statusCode`, `statusMessage`, `setHeader()`, `getHeader()`, `getHeaders()`, `hasHeader()`, `removeHeader()`
+  - `writeHead(status[, message][, headers])`, `write(chunk)`, `end([chunk][, callback])`, `writeContinue()`
+  - `headersSent`, `finished`; events `finish`, `close`
+- **Client**: `http.request(url | options[, options][, callback])`, `http.get(...)`
+  - Options: `hostname`/`host`, `port`, `path`, `method`, `headers`, `timeout`
+  - `req.write()`, `req.end()`, `req.setHeader()`, `req.setTimeout()`, `req.destroy()`, `req.abort()`
+  - Events: `response`, `information` (1xx), `error`, `timeout`, `close`
+- **Protocol**
+  - Keep-alive (HTTP/1.1 default) and request pipelining on the server
+  - Chunked transfer encoding in both directions, including trailers
+  - Content-Length added automatically when `end(data)` is called without prior writes
+  - `Date` and `Connection` headers added automatically
+  - Bodies may be strings or Buffers; Content-Length is counted in bytes
+  - `Expect: 100-continue` answered automatically
+  - Malformed requests get `400`, oversized headers `431`, and a handler that throws gets `500`
+  - Requests with both Content-Length and Transfer-Encoding are rejected (request smuggling)
+  - CR/LF in header names, values and request paths are rejected (header injection)
+- `http.METHODS`, `http.STATUS_CODES`
+- **Limitations**: plain HTTP only (no HTTPS), and the client opens one connection per request (no Agent/pooling)
 
 ## 📖 Usage Examples
 
@@ -104,6 +142,35 @@ fs.readFile('file.txt', (err, data) => {
     if (err) throw err;
     console.log(data);
 });
+```
+
+### HTTP Server
+```javascript
+const http = require('http');
+
+const server = http.createServer((req, res) => {
+    if (req.method === 'POST') {
+        let body = '';
+        req.on('data', (chunk) => body += chunk);
+        req.on('end', () => res.end(`Received ${body.length} characters\n`));
+        return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ path: req.url }));
+});
+
+server.listen(3000);
+```
+
+### HTTP Client
+```javascript
+const http = require('http');
+
+const req = http.request({ hostname: 'localhost', port: 3000, path: '/', method: 'POST' }, (res) => {
+    res.on('data', (chunk) => console.log(chunk));
+});
+req.on('error', (err) => console.error(err.message));
+req.end('hello');
 ```
 
 ### TCP Server
@@ -192,6 +259,7 @@ console.log('Home:', os.homedir());
 - Timer API
 - File system operations (sync & async)
 - TCP server/client
+- HTTP server/client
 - Module system with caching
 - Error handling with stack traces
 - Process object (argv, env, exit, cwd, pid, platform, version)
@@ -204,7 +272,7 @@ console.log('Home:', os.homedir());
 - None currently
 
 ### Planned Features ⏳
-- HTTP module
+- Events & Streams
 - REPL mode
 - Worker threads
 - Native ESM support (import/export)
@@ -223,6 +291,11 @@ Run example scripts to test features:
 # File system
 ./build/frogjs examples/fs-sync.js
 ./build/frogjs examples/fs-async.js
+
+# HTTP
+./build/frogjs examples/test-http.js
+./build/frogjs examples/http-server.js
+./build/frogjs examples/http-client.js
 
 # TCP
 ./build/frogjs examples/tcp-server.js

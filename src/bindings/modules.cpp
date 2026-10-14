@@ -99,7 +99,7 @@ void Require(const FunctionCallbackInfo<Value>& args) {
     Local<Object> global = context->Global();
 
     // Built-in modules are exposed as globals; require() returns the same object
-    static const char* builtinModules[] = {"fs", "net", "path", "os"};
+    static const char* builtinModules[] = {"fs", "net", "http", "path", "os"};
     for (const char* name : builtinModules) {
         if (requestedPath == name) {
             args.GetReturnValue().Set(global->Get(context,

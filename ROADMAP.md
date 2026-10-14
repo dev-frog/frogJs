@@ -1,6 +1,6 @@
 # FrogJS Development Roadmap
 
-## 📊 Current Status: Version 0.3.0
+## 📊 Current Status: Version 0.4.0
 
 ### ✅ Completed (v0.1.0)
 - Core V8 runtime integration
@@ -24,6 +24,12 @@
 - OS module (platform, arch, cpus, hostname, release, type, totalmem, freemem, homedir, tmpdir, EOL)
 - `require('path')`, `require('os')`, `require('fs')`, `require('net')` return the built-in modules
 - V8 15 compatibility
+
+### ✅ Completed (v0.4.0)
+- HTTP module: `http.createServer`, `http.request`, `http.get`
+- Server, IncomingMessage, ServerResponse and ClientRequest classes
+- HTTP/1.1 keep-alive, pipelining, chunked encoding, 100-continue
+- TCP module: hostname resolution, `server.address()`, `socket.destroy()`, `close` event, binary-safe writes
 
 ---
 
@@ -151,7 +157,7 @@ void SetupOS(Isolate* isolate, Local<Context> context);
 
 ---
 
-### Version 0.4.0 - HTTP Module (Recommended Next Step)
+### Version 0.4.0 - HTTP Module ✅ Completed
 
 **Priority: MEDIUM-HIGH**
 **Estimated Effort: 3-4 weeks**
@@ -172,14 +178,15 @@ void SetupHTTP(Isolate* isolate, Local<Context> context);
 - Basic HTTP/1.1 protocol support
 
 **Implementation Notes:**
-- Build on top of TCP module
-- Parse HTTP headers
-- Handle chunked encoding
-- Support basic routing
+- Written in JavaScript (embedded in `http.cpp`) on top of the TCP module, which runs in `latin1` mode so the protocol layer works on bytes
+- Incremental HTTP/1.x parser: headers, Content-Length and chunked bodies, trailers, pipelining
+- Rejects request smuggling (Content-Length + Transfer-Encoding) and header injection
+- Routing is left to user code (see `examples/http-server.js`)
+- Not included: HTTPS, client connection pooling (Agent)
 
 ---
 
-### Version 0.5.0 - Events & Streams
+### Version 0.5.0 - Events & Streams (Recommended Next Step)
 
 **Priority: MEDIUM**
 **Estimated Effort: 2-3 weeks**
@@ -370,8 +377,8 @@ declare module 'http' { ... }
 
 - **v0.2.0**: ✅ Completed
 - **v0.3.0**: ✅ Completed
-- **v0.4.0**: 3-4 weeks (recommended immediate focus)
-- **v0.5.0**: 2-3 weeks
+- **v0.4.0**: ✅ Done
+- **v0.5.0**: 2-3 weeks (recommended immediate focus)
 - **v0.6.0**: 2-3 weeks
 - **v0.7.0**: 2 weeks
 - **v0.8.0**: 4-6 weeks
@@ -384,11 +391,11 @@ declare module 'http' { ... }
 
 ## 🚀 Quick Start Recommendation
 
-Next up is **v0.4.0** (HTTP module), built on top of the existing TCP module:
+Next up is **v0.5.0** (Events & Streams). The HTTP module already has an internal event emitter that can become the public `EventEmitter`:
 
 ```bash
 # Create implementation branch
-git checkout -b feature/http-module
+git checkout -b feature/events-streams
 
 # Focus on one feature at a time
 # Test thoroughly with examples

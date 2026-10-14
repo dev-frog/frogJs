@@ -4,7 +4,7 @@
 [![Release](https://github.com/dev-frog/frogJs/actions/workflows/release.yml/badge.svg)](https://github.com/dev-frog/frogJs/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/dev-frog/frogJs?include_prereleases&sort=semver)](https://github.com/dev-frog/frogJs/releases/latest)
 
-**FrogJS** is a lightweight JavaScript runtime built on V8 and libuv, designed for server-side JavaScript development. Inspired by Node.js architecture, FrogJS provides a minimal yet powerful environment with CommonJS module support, TCP networking, file I/O, and asynchronous operations.
+**FrogJS** is a lightweight JavaScript runtime built on V8 and libuv, designed for server-side JavaScript development. Inspired by Node.js architecture, FrogJS provides a minimal yet powerful environment with CommonJS module support, HTTP and TCP networking, file I/O, and asynchronous operations.
 
 ---
 
@@ -13,6 +13,7 @@
 - **V8 JavaScript Engine**: Fast ECMAScript execution with modern JavaScript support
 - **Event-Driven I/O**: Non-blocking operations powered by libuv
 - **Module System**: CommonJS-style `require()` with caching and relative path support
+- **HTTP Server & Client**: Node-compatible `http` module (keep-alive, chunked encoding, pipelining)
 - **TCP Networking**: Built-in TCP server and client functionality
 - **File System**: Both sync and async file operations
 - **Timer API**: setTimeout, setInterval, clearTimeout, clearInterval
@@ -53,7 +54,7 @@ Prebuilt binaries are published on the [Releases page](https://github.com/dev-fr
 ```bash
 brew install v8 libuv   # runtime dependencies (linked dynamically)
 
-VERSION=0.3.0   # pick a version from the Releases page
+VERSION=0.4.0   # pick a version from the Releases page
 curl -LO https://github.com/dev-frog/frogJs/releases/download/v$VERSION/frogjs-$VERSION-macos-arm64.tar.gz
 curl -LO https://github.com/dev-frog/frogJs/releases/download/v$VERSION/frogjs-$VERSION-macos-arm64.tar.gz.sha256
 shasum -a 256 -c frogjs-$VERSION-macos-arm64.tar.gz.sha256
@@ -96,6 +97,31 @@ console.log("Hello from FrogJS! 🐸");
 Run it:
 ```bash
 ./build/frogjs examples/hello.js
+```
+
+### HTTP Server
+```javascript
+const http = require('http');
+
+const server = http.createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/plain');
+    res.end(`You requested ${req.method} ${req.url}\n`);
+});
+
+server.listen(3000, () => {
+    console.log('Listening on http://localhost:3000');
+});
+```
+
+### HTTP Client
+```javascript
+const http = require('http');
+
+http.get('http://localhost:3000/hello', (res) => {
+    let body = '';
+    res.on('data', (chunk) => body += chunk);
+    res.on('end', () => console.log(res.statusCode, body));
+});
 ```
 
 ### TCP Server
@@ -152,6 +178,9 @@ Check out the `examples/` directory for more samples:
 - `examples/timers.js` - Timer API usage
 - `examples/fs-sync.js` - Synchronous file operations
 - `examples/fs-async.js` - Asynchronous file operations
+- `examples/http-server.js` - HTTP server with basic routing
+- `examples/http-client.js` - HTTP client (GET and POST)
+- `examples/test-http.js` - HTTP module self-test
 - `examples/tcp-server.js` - TCP server implementation
 - `examples/tcp-client.js` - TCP client implementation
 - `examples/modules/` - Module system examples
@@ -161,6 +190,7 @@ Check out the `examples/` directory for more samples:
 Run examples:
 ```bash
 ./build/frogjs examples/timers.js
+./build/frogjs examples/http-server.js
 ./build/frogjs examples/tcp-server.js
 ./build/frogjs examples/modules/main.js
 ```
@@ -180,12 +210,13 @@ frogjs/
 │       ├── timers.cpp       # Timer API
 │       ├── fs.cpp           # File system API
 │       ├── net.cpp          # TCP networking
+│       ├── http.cpp         # HTTP server & client (JS on top of net)
 │       ├── path.cpp         # Path utilities
 │       ├── os.cpp           # OS information
 │       └── modules.cpp      # Module system
 ├── examples/                # Example scripts
 ├── docs/                    # Documentation
-├── include/                 # Header files (planned)
+├── include/frogjs/          # Shared headers (V8 compat, Buffer)
 ├── Makefile                 # Build configuration
 ├── CMakeLists.txt          # CMake build (in development)
 ├── README.md               # This file
@@ -203,6 +234,7 @@ frogjs/
 - Timer API (setTimeout, setInterval, etc.)
 - File system operations (sync & async)
 - TCP server/client networking
+- HTTP server/client (http.createServer, http.request, http.get)
 - Module system (require, exports, caching)
 - Error handling with stack traces
 - Process object (argv, env, exit, cwd, pid, platform)
@@ -213,7 +245,7 @@ frogjs/
 - Automated release builds via GitHub Actions
 
 ### Planned
-- HTTP module
+- Events & Streams
 - REPL mode
 - Worker threads
 - Windows support
@@ -267,15 +299,15 @@ Start a release in either of these ways:
 
 ```bash
 # 1. Push a tag (via the helper script or directly)
-./release.sh v0.3.0
-git tag -a v0.3.0 -m "Release v0.3.0" && git push origin v0.3.0
+./release.sh v0.4.0
+git tag -a v0.4.0 -m "Release v0.4.0" && git push origin v0.4.0
 
 # 2. Trigger from GitHub (the workflow creates the tag for you)
-gh workflow run release.yml -f version=v0.3.0
+gh workflow run release.yml -f version=v0.4.0
 #    or: Actions → Release → Run workflow
 ```
 
-Versions with a suffix such as `v0.3.0-rc.1` are published as pre-releases.
+Versions with a suffix such as `v0.4.0-rc.1` are published as pre-releases.
 CI for pushes and pull requests runs separately in [`.github/workflows/build.yml`](.github/workflows/build.yml).
 See [RELEASE_GUIDE.md](RELEASE_GUIDE.md) for details.
 
@@ -308,7 +340,7 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Version**: 0.3.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
+**Version**: 0.4.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
 **Status**: Active Development
 **Last Updated**: 2026-10-06
 

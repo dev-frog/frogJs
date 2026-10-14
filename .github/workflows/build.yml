@@ -53,6 +53,7 @@ jobs:
       run: |
         echo "Testing FrogJS basic functionality..."
         ./build/frogjs examples/hello.js
+        ./build/frogjs examples/test-http.js
 
     - name: Upload build artifact
       if: success()
