@@ -9,6 +9,8 @@ Complete API documentation for FrogJS runtime and built-in modules.
 - [File System API](#file-system-api)
 - [Network API](#network-api)
 - [HTTP API](#http-api)
+- [Events API](#events-api)
+- [Stream API](#stream-api)
 - [Module System](#module-system)
 
 ---
@@ -418,7 +420,7 @@ Close idle keep-alive connections, or every connection immediately.
 If a request handler (or a `req`/`res` listener) throws, the error is printed and the client gets `500 Internal Server Error`.
 
 ### IncomingMessage
-The `req` passed to a server's request handler, and the `res` passed to a client's response callback.
+The `req` passed to a server's request handler, and the `res` passed to a client's response callback. It is a [`stream.Readable`](#readable), so it can be piped (`req.pipe(res)`), passed to `pipeline()` or read with `for await...of`.
 
 - `method` (String), `url` (String): Request only
 - `statusCode` (Number), `statusMessage` (String): Response only
@@ -435,7 +437,9 @@ The `req` passed to a server's request handler, and the `res` passed to a client
 - `'aborted'`: The connection closed before the message completed
 - `'close'`
 
-Body data is buffered until a `'data'` listener is attached, so the body can be read later. If the body is never read, `'end'` waits; call `resume()` to discard it.
+Body data is buffered until a `'data'` listener is attached (or the message is piped), so the body can be read later. If the body is never read, `'end'` waits; call `resume()` to discard it. A message with no body emits `'end'` even if it is never read.
+
+`message.destroy()` closes the connection if the body is still arriving.
 
 #### `message.setEncoding(encoding)`
 `'utf8'` (default) or `'latin1'`/`'binary'` to receive each byte as one character.
@@ -473,6 +477,9 @@ Finish the response. If nothing was written before, `Content-Length` is set from
 #### `res.writeContinue()`
 Send `100 Continue`.
 
+#### `res.destroy([error])`
+Close the connection without finishing the response.
+
 #### Properties and events
 - `res.headersSent`, `res.finished` (Boolean)
 - `res.sendDate` (Boolean): Add a `Date` header (default `true`)
@@ -480,6 +487,8 @@ Send `100 Continue`.
 - `'close'`
 
 `Connection` (`keep-alive` or `close`) and `Date` headers are added automatically. Responses to `HEAD` and `204`/`304` responses have no body.
+
+A `ServerResponse` can be the destination of `pipe()` and `pipeline()`. Its `write()` always returns `true` (TCP sockets don't report backpressure yet), so a fast source is never paused.
 
 ```javascript
 http.createServer((req, res) => {
@@ -548,6 +557,227 @@ http.get('http://localhost:3000/', (res) => {
 
 ### `http.METHODS` / `http.STATUS_CODES`
 List of supported request methods, and a map from status code to reason phrase (`http.STATUS_CODES[404] === 'Not Found'`).
+
+---
+
+## Events API
+
+Node.js-compatible event emitter. `require('events')` returns the `EventEmitter` class (also available as the global `events`). Every HTTP object is an `EventEmitter`.
+
+```javascript
+const EventEmitter = require('events');
+
+class Downloader extends EventEmitter {}
+const d = new Downloader();
+d.on('progress', (pct) => console.log(`${pct}%`));
+d.emit('progress', 50);  // true: there was a listener
+```
+
+### Listening
+#### `emitter.on(name, listener)` / `emitter.addListener(name, listener)`
+Add `listener` to the end of the list for `name` (a string or symbol). Returns the emitter.
+
+#### `emitter.once(name, listener)`
+Like `on()`, but the listener is removed before its first call.
+
+#### `emitter.prependListener(name, listener)` / `emitter.prependOnceListener(name, listener)`
+Add the listener to the front of the list.
+
+#### `emitter.off(name, listener)` / `emitter.removeListener(name, listener)`
+Remove the most recently added copy of `listener` (also works for `once()` listeners).
+
+#### `emitter.removeAllListeners([name])`
+Remove every listener for `name`, or for all events.
+
+### Emitting
+#### `emitter.emit(name, ...args)`
+Call each listener synchronously, in order, with `args` and `this` set to the emitter. Returns `true` if there were listeners. Listeners added or removed during an `emit()` take effect from the next one. An exception thrown by a listener propagates to the caller of `emit()`.
+
+### Inspecting
+- `emitter.listeners(name)`: Copy of the listeners (`once()` wrappers unwrapped)
+- `emitter.rawListeners(name)`: Copy including `once()` wrappers
+- `emitter.listenerCount(name[, listener])`
+- `emitter.eventNames()`: Names (and symbols) that have listeners
+- `emitter.setMaxListeners(n)` / `emitter.getMaxListeners()`: Above this count a `MaxListenersExceededWarning` is printed once per event (0 = unlimited)
+- `EventEmitter.defaultMaxListeners`: Default limit (10)
+
+### Special events
+- `'error'`: If nothing listens, `emit('error', err)` throws `err` (or an `ERR_UNHANDLED_ERROR` error for non-`Error` values)
+- `EventEmitter.errorMonitor`: Listeners for this symbol see every `'error'` before the regular listeners, without counting as handlers
+- `'newListener'` `(name, listener)`: Emitted before a listener is added
+- `'removeListener'` `(name, listener)`: Emitted after a listener is removed
+
+### Helpers
+#### `events.once(emitter, name)`
+A Promise that resolves with the arguments array of the next `name` event, or rejects if `'error'` is emitted first.
+
+```javascript
+const [port] = await EventEmitter.once(server, 'ready');
+```
+
+#### `events.on(emitter, name)`
+An async iterator over the argument arrays of `name` events. An `'error'` event makes the loop throw; `break` removes the listeners.
+
+```javascript
+for await (const [chunk] of EventEmitter.on(source, 'chunk')) {
+    if (chunk === 'stop') break;
+}
+```
+
+#### Inheritance
+`class X extends EventEmitter`, the older `EventEmitter.call(this)` pattern, and objects created with `Object.create(EventEmitter.prototype)` all work.
+
+---
+
+## Stream API
+
+Node.js-style streams. `require('stream')` returns the module (also the global `stream`), with `Readable`, `Writable`, `Duplex`, `Transform`, `PassThrough`, `pipeline`, `finished` and `promises`. All streams are `EventEmitter`s.
+
+Chunks are strings or Buffers, or any value except `null` in `objectMode`. Unlike Node.js, strings are not converted to Buffers: `_write()` receives them as strings, and their length counts characters (for `highWaterMark` and `read(n)`).
+
+**Common options** (constructor argument):
+- `highWaterMark` (Number): Buffer size at which backpressure starts. Default 16384 (16 objects in `objectMode`)
+- `objectMode` (Boolean): Chunks are arbitrary values; each counts as 1
+- `emitClose` (Boolean): Emit `'close'` after destroy. Default `true`
+- `autoDestroy` (Boolean): Destroy the stream after `'end'`/`'finish'`. Default `true`
+- `destroy` (Function): Implementation of `_destroy(err, callback)`
+
+### Readable
+```javascript
+const { Readable } = require('stream');
+
+let n = 0;
+const counter = new Readable({
+    read() {
+        n++;
+        this.push(n <= 3 ? `tick ${n}\n` : null);  // null ends the stream
+    },
+});
+counter.on('data', (chunk) => console.log(String(chunk)));
+counter.on('end', () => console.log('done'));
+```
+
+**Options:** `read` (implementation of `_read(size)`), `encoding` (same as `setEncoding()`), plus the common options.
+
+#### Implementing: `_read(size)` and `readable.push(chunk[, encoding])`
+`_read()` is called when the stream wants data; it should `push()` chunks, now or later. `push()` returns `false` once the buffer reaches `highWaterMark`; stop pushing until `_read()` is called again. `push(null)` signals the end.
+
+#### `readable.read([size])`
+In paused mode, take `size` units (or everything buffered) from the buffer, or `null` if not enough is available. Emits `'data'` with the chunk.
+
+#### `readable.pause()` / `readable.resume()` / `readable.isPaused()`
+Switch between flowing and paused mode. Adding a `'data'` listener (or piping) starts flowing mode; adding a `'readable'` listener switches to paused mode.
+
+#### `readable.setEncoding(encoding)`
+Emit strings decoded from Buffers: `'utf8'` (characters split across chunks are reassembled), `'latin1'`/`'binary'`, `'ascii'` or `'hex'`.
+
+#### `readable.pipe(destination[, options])`
+Write all data to `destination` and return it. When `destination.write()` returns `false`, the source pauses until `'drain'`. `destination.end()` is called at the end unless `options.end` is `false`. Errors are not forwarded: use `pipeline()` for that.
+
+#### `readable.unpipe([destination])`
+Stop piping to `destination` (or to all destinations) and pause.
+
+#### `readable.unshift(chunk)`
+Put a chunk back at the front of the buffer.
+
+#### `readable.destroy([error])`
+Destroy the stream, emitting `'error'` (if `error` is given) and `'close'`.
+
+#### `readable[Symbol.asyncIterator]()`
+```javascript
+for await (const chunk of readable) { ... }
+```
+Leaving the loop early (`break`, `return`, `throw`) destroys the stream.
+
+#### `Readable.from(iterable[, options])`
+A readable (in `objectMode` by default) of the values of an array, iterable, async iterable or generator.
+
+#### Properties
+`readable` (Boolean), `readableFlowing` (`null`, `true` or `false`), `readableLength`, `readableHighWaterMark`, `readableEncoding`, `readableEnded`, `readableObjectMode`, `destroyed`, `closed`, `errored`
+
+#### Events
+- `'data'` `(chunk)`, `'end'`, `'readable'`, `'pause'`, `'resume'`
+- `'error'` `(err)`, `'close'`
+
+### Writable
+```javascript
+const { Writable } = require('stream');
+
+const log = new Writable({
+    write(chunk, encoding, callback) {
+        console.log('got', String(chunk));
+        callback();  // pass an Error to fail the write
+    },
+});
+log.write('a');
+log.end('b', () => console.log('all written'));
+```
+
+**Options:** `write` (implementation of `_write(chunk, encoding, callback)`), `writev` (`_writev(chunks, callback)`, which receives `{ chunk, encoding }` entries when several writes are queued), `final` (`_final(callback)`, called before `'finish'`), `defaultEncoding`, plus the common options.
+
+#### `writable.write(chunk[, encoding][, callback])`
+Queue a chunk. Returns `false` when the queue has reached `highWaterMark` (checked after a synchronous `_write()`, as in Node.js 22+): stop writing until `'drain'`. `callback(err)` runs once the chunk is handled. Writing after `end()` emits an `ERR_STREAM_WRITE_AFTER_END` error.
+
+#### `writable.end([chunk][, encoding][, callback])`
+Write a final chunk, then finish. `callback` runs on `'finish'` (or with an error).
+
+#### `writable.cork()` / `writable.uncork()`
+Buffer writes until `uncork()`, then pass them to `_writev()` in one call if it is implemented.
+
+#### `writable.setDefaultEncoding(encoding)` / `writable.destroy([error])`
+
+#### Properties
+`writable` (Boolean), `writableLength`, `writableHighWaterMark`, `writableNeedDrain`, `writableEnded`, `writableFinished`, `writableCorked`, `writableObjectMode`, `destroyed`, `closed`, `errored`
+
+#### Events
+- `'drain'`: The queue emptied after `write()` returned `false`
+- `'finish'`: `end()` was called and all data was handled
+- `'pipe'` `(src)`, `'unpipe'` `(src)`, `'error'` `(err)`, `'close'`
+
+### Duplex
+Both readable and writable, with independent sides: implement `_read()` and `_write()`. Options can be set per side with `readableHighWaterMark`/`writableHighWaterMark` and `readableObjectMode`/`writableObjectMode`. With `allowHalfOpen: false`, the writable side ends when the readable side ends. A `Duplex` is `instanceof` both `Readable` and `Writable`.
+
+### Transform
+A Duplex whose output is computed from its input.
+
+```javascript
+const { Transform } = require('stream');
+
+const upper = new Transform({
+    transform(chunk, encoding, callback) {
+        callback(null, String(chunk).toUpperCase());  // or this.push(...) any number of times
+    },
+    flush(callback) {
+        callback(null, '\n-- end --\n');  // optional final output
+    },
+});
+```
+
+When the readable side is full, `transform()` is not called again until the output is read (backpressure).
+
+### PassThrough
+A Transform that outputs its input unchanged.
+
+### `stream.pipeline(source, ...transforms, destination, callback)`
+Pipe the streams together. If any stream fails, all of them are destroyed. `callback(err)` runs once, after every stream has finished or closed. `source` may also be an iterable or async iterable. Returns `destination`.
+
+```javascript
+const { pipeline, Transform } = require('stream');
+
+http.createServer((req, res) => {
+    pipeline(req, new Transform({
+        transform(chunk, encoding, cb) { cb(null, String(chunk).toUpperCase()); },
+    }), res, (err) => {
+        if (err) console.error('Request failed:', err.message);
+    });
+}).listen(3000);
+```
+
+### `stream.finished(stream[, options], callback)`
+Call `callback(err)` once the stream has ended (readable), finished (writable), errored, or closed early (`ERR_STREAM_PREMATURE_CLOSE`). `options.readable`/`options.writable` select which side to wait for. Returns a function that removes the listeners.
+
+### `stream.promises.pipeline(...)` / `stream.promises.finished(stream[, options])`
+Promise versions of `pipeline()` and `finished()`.
 
 ---
 
@@ -719,5 +949,5 @@ console.log(math.add(1, 2)); // 3
 
 ---
 
-**Last Updated:** 2025-10-28
-**API Version:** 0.1.0
+**Last Updated:** 2026-10-16
+**API Version:** 0.5.0

@@ -16,6 +16,8 @@ void SetupBuffer(Isolate* isolate, Local<Context> context);
 void SetupTimers(Isolate* isolate, Local<Context> context);
 void SetupFileSystem(Isolate* isolate, Local<Context> context);
 void SetupNet(Isolate* isolate, Local<Context> context);
+void SetupEvents(Isolate* isolate, Local<Context> context);
+void SetupStream(Isolate* isolate, Local<Context> context);
 void SetupHTTP(Isolate* isolate, Local<Context> context);
 void SetupPath(Isolate* isolate, Local<Context> context);
 void SetupOS(Isolate* isolate, Local<Context> context);
@@ -172,6 +174,8 @@ int main(int argc, char* argv[]) {
         SetupTimers(isolate, context);
         SetupFileSystem(isolate, context);
         SetupNet(isolate, context);
+        SetupEvents(isolate, context);
+        SetupStream(isolate, context);
         SetupHTTP(isolate, context);
         SetupPath(isolate, context);
         SetupOS(isolate, context);

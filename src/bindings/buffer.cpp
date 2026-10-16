@@ -3,6 +3,7 @@
 #include "frogjs/buffer.h"
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 using namespace v8;
 
@@ -335,6 +336,129 @@ void BufferSlice(const FunctionCallbackInfo<Value>& args) {
     args.GetReturnValue().Set(slice_obj);
 }
 
+// Create a Buffer that takes ownership of data (allocated with new[])
+static Local<Object> NewBufferFromData(Isolate* isolate, Local<Context> context, char* data, size_t length) {
+    Local<Function> ctor = Local<FunctionTemplate>::New(isolate, g_buffer_template)->GetFunction(context).ToLocalChecked();
+    Local<Value> argv[1] = {Number::New(isolate, 0)};
+    Local<Object> buffer_obj = ctor->NewInstance(context, 1, argv).ToLocalChecked();
+
+    delete GetBufferData(buffer_obj);  // empty placeholder from the constructor
+    buffer_obj->SetInternalField(BUFFER_DATA_FIELD, frogjs::NewExternal(isolate, new BufferData{data, length, true}));
+    buffer_obj->SetInternalField(BUFFER_LENGTH_FIELD, Integer::New(isolate, length));
+    buffer_obj->Set(context, String::NewFromUtf8(isolate, "length").ToLocalChecked(),
+        Integer::New(isolate, length)).Check();
+    return buffer_obj;
+}
+
+// Buffer.isBuffer(value)
+void BufferIsBuffer(const FunctionCallbackInfo<Value>& args) {
+    args.GetReturnValue().Set(args.Length() > 0 && IsBuffer(args[0]));
+}
+
+// Buffer.concat(list[, totalLength])
+void BufferConcat(const FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    HandleScope handle_scope(isolate);
+    Local<Context> context = isolate->GetCurrentContext();
+
+    if (args.Length() < 1 || !args[0]->IsArray()) {
+        isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate,
+            "The \"list\" argument must be an Array of Buffers").ToLocalChecked()));
+        return;
+    }
+
+    Local<Array> list = args[0].As<Array>();
+    std::vector<BufferData*> parts;
+    size_t total = 0;
+    for (uint32_t i = 0; i < list->Length(); i++) {
+        Local<Value> item = list->Get(context, i).ToLocalChecked();
+        if (!IsBuffer(item)) {
+            isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate,
+                "The \"list\" argument must be an Array of Buffers").ToLocalChecked()));
+            return;
+        }
+        BufferData* data = GetBufferData(item.As<Object>());
+        parts.push_back(data);
+        total += data->length;
+    }
+
+    size_t length = total;
+    if (args.Length() >= 2 && args[1]->IsNumber()) {
+        int64_t requested = args[1]->IntegerValue(context).FromMaybe(0);
+        length = requested > 0 ? static_cast<size_t>(requested) : 0;
+    }
+
+    char* data = length > 0 ? new char[length]() : nullptr;
+    size_t offset = 0;
+    for (BufferData* part : parts) {
+        if (offset >= length) break;
+        size_t n = std::min(part->length, length - offset);
+        if (n > 0) memcpy(data + offset, part->data, n);
+        offset += n;
+    }
+    args.GetReturnValue().Set(NewBufferFromData(isolate, context, data, length));
+}
+
+// toByteString(value): UTF-8 encode a string, or copy a Buffer's raw bytes, into a
+// byte string (one char per byte, codes 0-255)
+void ToByteString(const FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    HandleScope handle_scope(isolate);
+
+    if (args.Length() > 0 && IsBuffer(args[0])) {
+        BufferData* data = GetBufferData(args[0].As<Object>());
+        if (data == nullptr || data->data == nullptr || data->length == 0) {
+            args.GetReturnValue().Set(String::Empty(isolate));
+            return;
+        }
+        args.GetReturnValue().Set(String::NewFromOneByte(isolate, (const uint8_t*)data->data,
+            NewStringType::kNormal, data->length).ToLocalChecked());
+        return;
+    }
+
+    if (args.Length() < 1 || !args[0]->IsString()) {
+        isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate,
+            "The \"chunk\" argument must be of type string or Buffer").ToLocalChecked()));
+        return;
+    }
+
+    String::Utf8Value utf8(isolate, args[0]);
+    args.GetReturnValue().Set(String::NewFromOneByte(isolate, (const uint8_t*)*utf8,
+        NewStringType::kNormal, utf8.length()).ToLocalChecked());
+}
+
+// byteStringToUtf8(bytes): decode a byte string as UTF-8 (invalid sequences become U+FFFD)
+void ByteStringToUtf8(const FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    HandleScope handle_scope(isolate);
+    Local<Context> context = isolate->GetCurrentContext();
+
+    Local<String> str;
+    if (args.Length() < 1 || !args[0]->ToString(context).ToLocal(&str) || str->Length() == 0) {
+        args.GetReturnValue().Set(String::Empty(isolate));
+        return;
+    }
+
+    std::vector<uint8_t> bytes(str->Length());
+    frogjs::WriteOneByte(isolate, str, bytes.data());
+    args.GetReturnValue().Set(String::NewFromUtf8(isolate, (const char*)bytes.data(),
+        NewStringType::kNormal, bytes.size()).ToLocalChecked());
+}
+
+// byteStringToBuffer(bytes): a Buffer holding a byte string's bytes
+void ByteStringToBuffer(const FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    HandleScope handle_scope(isolate);
+    Local<Context> context = isolate->GetCurrentContext();
+
+    Local<String> str;
+    if (args.Length() < 1 || !args[0]->ToString(context).ToLocal(&str)) return;
+    size_t length = str->Length();
+    char* data = length > 0 ? new char[length] : nullptr;
+    if (length > 0) frogjs::WriteOneByte(isolate, str, reinterpret_cast<uint8_t*>(data));
+    args.GetReturnValue().Set(NewBufferFromData(isolate, context, data, length));
+}
+
 // Buffer finalizer - cleanup data when buffer is garbage collected
 void BufferFinalizer(const WeakCallbackInfo<Object>& data) {
     // This would be called when buffer is garbage collected
@@ -387,6 +511,20 @@ void SetupBuffer(Isolate* isolate, Local<Context> context) {
         context,
         String::NewFromUtf8(isolate, "from").ToLocalChecked(),
         FunctionTemplate::New(isolate, BufferFrom)->GetFunction(context).ToLocalChecked()
+    ).Check();
+
+    // Buffer.concat()
+    buffer_ctor->Set(
+        context,
+        String::NewFromUtf8(isolate, "concat").ToLocalChecked(),
+        FunctionTemplate::New(isolate, BufferConcat)->GetFunction(context).ToLocalChecked()
+    ).Check();
+
+    // Buffer.isBuffer()
+    buffer_ctor->Set(
+        context,
+        String::NewFromUtf8(isolate, "isBuffer").ToLocalChecked(),
+        FunctionTemplate::New(isolate, BufferIsBuffer)->GetFunction(context).ToLocalChecked()
     ).Check();
 
     // Buffer.byteLength()

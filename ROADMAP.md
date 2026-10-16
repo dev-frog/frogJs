@@ -1,6 +1,6 @@
 # FrogJS Development Roadmap
 
-## 📊 Current Status: Version 0.4.0
+## 📊 Current Status: Version 0.5.0
 
 ### ✅ Completed (v0.1.0)
 - Core V8 runtime integration
@@ -30,6 +30,13 @@
 - Server, IncomingMessage, ServerResponse and ClientRequest classes
 - HTTP/1.1 keep-alive, pipelining, chunked encoding, 100-continue
 - TCP module: hostname resolution, `server.address()`, `socket.destroy()`, `close` event, binary-safe writes
+
+### ✅ Completed (v0.5.0)
+- Events module: Node-compatible `EventEmitter`, `events.once`, `events.on`, `errorMonitor`
+- Stream module: `Readable`, `Writable`, `Duplex`, `Transform`, `PassThrough`, `pipeline`, `finished`, `stream.promises`
+- `pipe()` with backpressure, async iteration, `Readable.from()`
+- HTTP classes are `EventEmitter`s; `IncomingMessage` is a `Readable` (`req.pipe(res)`, `for await`)
+- `Buffer.concat()`, `Buffer.isBuffer()`
 
 ---
 
@@ -186,7 +193,7 @@ void SetupHTTP(Isolate* isolate, Local<Context> context);
 
 ---
 
-### Version 0.5.0 - Events & Streams (Recommended Next Step)
+### Version 0.5.0 - Events & Streams ✅ Completed
 
 **Priority: MEDIUM**
 **Estimated Effort: 2-3 weeks**
@@ -210,14 +217,22 @@ void SetupEvents(Isolate* isolate, Local<Context> context);
 ```
 
 **Features:**
-- `ReadableStream` base class
-- `WritableStream` base class
+- `Readable` base class
+- `Writable` base class
 - `stream.pipe(destination)` - Pipe streams
 - Basic backpressure handling
 
+**Implementation Notes:**
+- Both modules are written in JavaScript embedded in `events.cpp` / `stream.cpp` (loaded by `src/utils/js_module.cpp`), like `http`
+- Names follow Node.js (`Readable`/`Writable`, plus `Duplex`, `Transform`, `PassThrough`), not the WHATWG `ReadableStream`/`WritableStream`
+- Stream internals follow the Node.js algorithms (flowing/paused modes, `highWaterMark`, `'drain'`, `autoDestroy`); `examples/test-events.js` and `examples/test-streams.js` pass under both FrogJS and Node.js
+- Strings are not converted to Buffers, so string lengths count characters; `setEncoding()` supports utf8, latin1, ascii and hex
+- The HTTP module's internal emitter was replaced by the public one, and `IncomingMessage` now extends `Readable`
+- Not included yet: `fs.createReadStream`/`createWriteStream`, backpressure from TCP sockets (`net` sockets are not streams yet)
+
 ---
 
-### Version 0.6.0 - REPL & CLI Improvements
+### Version 0.6.0 - REPL & CLI Improvements (Recommended Next Step)
 
 **Priority: MEDIUM**
 **Estimated Effort: 2-3 weeks**
@@ -378,8 +393,8 @@ declare module 'http' { ... }
 - **v0.2.0**: ✅ Completed
 - **v0.3.0**: ✅ Completed
 - **v0.4.0**: ✅ Done
-- **v0.5.0**: 2-3 weeks (recommended immediate focus)
-- **v0.6.0**: 2-3 weeks
+- **v0.5.0**: ✅ Done
+- **v0.6.0**: 2-3 weeks (recommended immediate focus)
 - **v0.7.0**: 2 weeks
 - **v0.8.0**: 4-6 weeks
 - **v0.9.0**: 2-3 weeks
@@ -391,11 +406,13 @@ declare module 'http' { ... }
 
 ## 🚀 Quick Start Recommendation
 
-Next up is **v0.5.0** (Events & Streams). The HTTP module already has an internal event emitter that can become the public `EventEmitter`:
+Next up is **v0.6.0** (REPL & CLI). Smaller follow-ups that build on v0.5.0:
+- `fs.createReadStream` / `fs.createWriteStream` on top of `stream.Readable`/`Writable`
+- Make `net` sockets `Duplex` streams so `socket.write()` reports backpressure (HTTP responses would inherit it)
 
 ```bash
 # Create implementation branch
-git checkout -b feature/events-streams
+git checkout -b feature/repl-cli
 
 # Focus on one feature at a time
 # Test thoroughly with examples

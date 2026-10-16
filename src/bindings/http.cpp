@@ -1,15 +1,16 @@
 #include <v8.h>
 #include "frogjs/v8_compat.h"
 #include "frogjs/buffer.h"
-#include <vector>
+#include "frogjs/js_module.h"
 
 using namespace v8;
 
 // The http module is written in JavaScript on top of the net module. Sockets
 // run in 'latin1' mode, so all protocol data is handled as byte strings (one
 // char per byte, codes 0-255); toBytes/bytesToUtf8 convert user data at the edges.
+// The classes build on the events and stream modules: IncomingMessage is a Readable.
 static const char* kHttpSource = R"JS(
-(function (net, binding, setTimeout, clearTimeout) {
+(function (net, binding, setTimeout, clearTimeout, EventEmitter, Readable) {
 'use strict';
 
 const METHODS = [
@@ -112,58 +113,28 @@ class Utf8Decoder {
   }
 }
 
-// Minimal internal event emitter. Listener exceptions are reported, not thrown,
-// so they can't corrupt protocol state.
-class EventEmitter {
-  constructor() { this._events = Object.create(null); }
-  on(name, listener) {
-    (this._events[name] || (this._events[name] = [])).push(listener);
-    return this;
+// Listener exceptions on protocol objects are reported, not thrown, so they
+// can't corrupt protocol state; _onListenerError lets the server answer 500.
+// An 'error' with no listener is reported instead of thrown.
+function protocolEmit(name, ...args) {
+  const listeners = this.rawListeners(name);
+  if (listeners.length === 0) {
+    if (name === 'error') reportError(args[0]);
+    return false;
   }
-  addListener(name, listener) { return this.on(name, listener); }
-  once(name, listener) {
-    const wrapper = (...args) => {
-      this.off(name, wrapper);
+  for (const listener of listeners) {
+    try {
       listener.apply(this, args);
-    };
-    wrapper.listener = listener;
-    return this.on(name, wrapper);
-  }
-  off(name, listener) {
-    const list = this._events[name];
-    if (list) {
-      const i = list.findIndex((l) => l === listener || l.listener === listener);
-      if (i >= 0) list.splice(i, 1);
+    } catch (err) {
+      reportError(err);
+      if (this._onListenerError) this._onListenerError(err);
     }
-    return this;
   }
-  removeListener(name, listener) { return this.off(name, listener); }
-  removeAllListeners(name) {
-    if (name === undefined) this._events = Object.create(null);
-    else delete this._events[name];
-    return this;
-  }
-  listenerCount(name) {
-    const list = this._events[name];
-    return list ? list.length : 0;
-  }
-  emit(name, ...args) {
-    const list = this._events[name];
-    if (!list || list.length === 0) {
-      if (name === 'error') reportError(args[0]);
-      return false;
-    }
-    for (const listener of list.slice()) {
-      try {
-        listener.apply(this, args);
-      } catch (err) {
-        reportError(err);
-        if (this._onListenerError) this._onListenerError(err);
-      }
-    }
-    return true;
-  }
+  return true;
 }
+
+class ProtocolEmitter extends EventEmitter {}
+ProtocolEmitter.prototype.emit = protocolEmit;
 
 // Parse "Name: value" lines into a headers object and a raw [name, value, ...] list
 function parseHeaderLines(lines, start, headers, raw) {
@@ -423,10 +394,10 @@ class HTTPParser {
   }
 }
 
-// A received request (server side) or response (client side).
-// 'data' delivers UTF-8 strings (byte strings after setEncoding('latin1')).
-// Body chunks are buffered until a 'data' listener is attached or resume() is called.
-class IncomingMessage extends EventEmitter {
+// A received request (server side) or response (client side): a Readable of
+// UTF-8 strings (byte strings after setEncoding('latin1')). Body chunks are
+// buffered until a 'data' listener is attached, resume() is called or it is piped.
+class IncomingMessage extends Readable {
   constructor(socket) {
     super();
     this.socket = socket;
@@ -444,12 +415,8 @@ class IncomingMessage extends EventEmitter {
     this.statusMessage = null;
     this.complete = false;
     this.aborted = false;
-    this.readableEnded = false;
-    this._chunks = [];
-    this._encoding = 'utf8';
+    this._latin1 = false;
     this._decoder = new Utf8Decoder();
-    this._flowing = false;
-    this._flushScheduled = false;
   }
 
   _init(info) {
@@ -462,71 +429,47 @@ class IncomingMessage extends EventEmitter {
     this.httpVersion = info.versionMajor + '.' + info.versionMinor;
   }
 
+  // Body bytes are decoded here as they arrive, rather than by Readable
   setEncoding(encoding) {
-    this._encoding = encoding === 'latin1' || encoding === 'binary' ? 'latin1' : 'utf8';
+    this._latin1 = encoding === 'latin1' || encoding === 'binary';
     return this;
   }
 
-  on(name, listener) {
-    super.on(name, listener);
-    if (name === 'data' || name === 'end') this._scheduleFlush();
-    return this;
-  }
+  // Data is pushed as it arrives from the socket
+  _read() {}
 
-  // Start the flow of data without a 'data' listener (discarding the body)
-  resume() {
-    this._flowing = true;
-    this._scheduleFlush();
-    return this;
+  // Destroying a message whose body is still arriving closes the connection
+  _destroy(err, callback) {
+    if (!this.complete && this.socket && !this.socket.destroyed) this.socket.destroy();
+    callback(err);
   }
 
   _push(bytes) {
-    this._chunks.push(bytes);
-    this._scheduleFlush();
+    const data = this._latin1 ? bytes : this._decoder.write(bytes);
+    if (data.length > 0) this.push(data);
   }
 
   _complete() {
     this.complete = true;
-    this._scheduleFlush();
+    if (!this._latin1) {
+      const rest = this._decoder.end();
+      if (rest) this.push(rest);
+    }
+    this.push(null);
+    // A message without a body ends even if nobody reads it
+    if (this.readableLength === 0) this.read(0);
   }
 
   _abort() {
     defer(() => {
-      if (this.readableEnded) return;
+      if (this.readableEnded || this.destroyed) return;
       this.aborted = true;
       this.emit('aborted');
-      this.emit('close');
+      this.destroy();
     });
-  }
-
-  _scheduleFlush() {
-    if (this._flushScheduled) return;
-    this._flushScheduled = true;
-    defer(() => {
-      this._flushScheduled = false;
-      this._flush();
-    });
-  }
-
-  _flush() {
-    if (this.readableEnded || this.aborted) return;
-    const latin1 = this._encoding === 'latin1';
-    if (this._flowing || this.listenerCount('data') > 0) {
-      while (this._chunks.length > 0) {
-        const bytes = this._chunks.shift();
-        const data = latin1 ? bytes : this._decoder.write(bytes);
-        if (data.length > 0) this.emit('data', data);
-      }
-    }
-    if (this.complete && this._chunks.length === 0) {
-      const rest = latin1 ? '' : this._decoder.end();
-      if (rest) this.emit('data', rest);
-      this.readableEnded = true;
-      this.emit('end');
-      this.emit('close');
-    }
   }
 }
+IncomingMessage.prototype.emit = protocolEmit;
 
 function validateHeader(name, value) {
   if (typeof name !== 'string' || !TOKEN.test(name)) {
@@ -543,7 +486,7 @@ function validateHeader(name, value) {
 }
 
 // Shared header and body handling for ServerResponse and ClientRequest
-class OutgoingMessage extends EventEmitter {
+class OutgoingMessage extends ProtocolEmitter {
   constructor(socket) {
     super();
     this.socket = socket;
@@ -750,6 +693,13 @@ class ServerResponse extends OutgoingMessage {
     this.socket.write(bytes, 'latin1');
   }
 
+  // Close the connection without finishing the response
+  destroy(err) {
+    if (err) defer(() => this.emit('error', err));
+    this.socket.destroy();
+    return this;
+  }
+
   _onEnd() {
     this._done = true;
     this._emitFinish();
@@ -758,7 +708,7 @@ class ServerResponse extends OutgoingMessage {
   }
 }
 
-class Server extends EventEmitter {
+class Server extends ProtocolEmitter {
   constructor(options, requestListener) {
     super();
     if (typeof options === 'function') {
@@ -924,7 +874,7 @@ class Server extends EventEmitter {
     }
 
     // Like emit('request'), but stops at the first throwing handler
-    const listeners = (this._events.request || []).slice();
+    const listeners = this.rawListeners('request');
     for (const listener of listeners) {
       try {
         listener.call(this, req, res);
@@ -1280,89 +1230,33 @@ return {
 })
 )JS";
 
-// toBytes(value): UTF-8 encode a string, or copy a Buffer's raw bytes, into a byte string
-static void ToBytes(const FunctionCallbackInfo<Value>& args) {
-    Isolate* isolate = args.GetIsolate();
-    HandleScope handle_scope(isolate);
-
-    if (args.Length() > 0 && IsBuffer(args[0])) {
-        BufferData* data = GetBufferData(args[0].As<Object>());
-        if (data == nullptr || data->data == nullptr || data->length == 0) {
-            args.GetReturnValue().Set(String::Empty(isolate));
-            return;
-        }
-        args.GetReturnValue().Set(String::NewFromOneByte(isolate, (const uint8_t*)data->data,
-            NewStringType::kNormal, data->length).ToLocalChecked());
-        return;
-    }
-
-    if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate,
-            "The \"chunk\" argument must be of type string or Buffer").ToLocalChecked()));
-        return;
-    }
-
-    String::Utf8Value utf8(isolate, args[0]);
-    args.GetReturnValue().Set(String::NewFromOneByte(isolate, (const uint8_t*)*utf8,
-        NewStringType::kNormal, utf8.length()).ToLocalChecked());
-}
-
-// bytesToUtf8(bytes): decode a byte string as UTF-8 (invalid sequences become U+FFFD)
-static void BytesToUtf8(const FunctionCallbackInfo<Value>& args) {
-    Isolate* isolate = args.GetIsolate();
-    HandleScope handle_scope(isolate);
-    Local<Context> context = isolate->GetCurrentContext();
-
-    Local<String> str;
-    if (args.Length() < 1 || !args[0]->ToString(context).ToLocal(&str) || str->Length() == 0) {
-        args.GetReturnValue().Set(String::Empty(isolate));
-        return;
-    }
-
-    std::vector<uint8_t> bytes(str->Length());
-    frogjs::WriteOneByte(isolate, str, bytes.data());
-    args.GetReturnValue().Set(String::NewFromUtf8(isolate, (const char*)bytes.data(),
-        NewStringType::kNormal, bytes.size()).ToLocalChecked());
-}
-
-static void ReportSetupError(Isolate* isolate, TryCatch& try_catch) {
-    String::Utf8Value error(isolate, try_catch.Exception());
-    fprintf(stderr, "Failed to initialize http module: %s\n", *error);
-}
-
-// Set up http module (requires SetupNet and SetupTimers first)
+// Set up http module (requires SetupNet, SetupTimers, SetupEvents and SetupStream first)
 void SetupHTTP(Isolate* isolate, Local<Context> context) {
     Local<Object> global = context->Global();
+    auto getGlobal = [&](const char* name) {
+        return global->Get(context, String::NewFromUtf8(isolate, name).ToLocalChecked()).ToLocalChecked();
+    };
 
     Local<Object> binding = Object::New(isolate);
-    binding->Set(context, String::NewFromUtf8(isolate, "toBytes").ToLocalChecked(),
-        FunctionTemplate::New(isolate, ToBytes)->GetFunction(context).ToLocalChecked()).Check();
-    binding->Set(context, String::NewFromUtf8(isolate, "bytesToUtf8").ToLocalChecked(),
-        FunctionTemplate::New(isolate, BytesToUtf8)->GetFunction(context).ToLocalChecked()).Check();
-
-    TryCatch try_catch(isolate);
-    Local<String> source = String::NewFromUtf8(isolate, kHttpSource).ToLocalChecked();
-    ScriptOrigin origin(String::NewFromUtf8(isolate, "frogjs:http").ToLocalChecked());
-
-    Local<Script> script;
-    Local<Value> factory;
-    if (!Script::Compile(context, source, &origin).ToLocal(&script) ||
-        !script->Run(context).ToLocal(&factory) || !factory->IsFunction()) {
-        ReportSetupError(isolate, try_catch);
-        return;
-    }
+    frogjs::SetFunction(isolate, context, binding, "toBytes", ToByteString);
+    frogjs::SetFunction(isolate, context, binding, "bytesToUtf8", ByteStringToUtf8);
 
     // Capture the built-ins now so user code replacing the globals can't break http
-    Local<Value> argv[4] = {
-        global->Get(context, String::NewFromUtf8(isolate, "net").ToLocalChecked()).ToLocalChecked(),
-        binding,
-        global->Get(context, String::NewFromUtf8(isolate, "setTimeout").ToLocalChecked()).ToLocalChecked(),
-        global->Get(context, String::NewFromUtf8(isolate, "clearTimeout").ToLocalChecked()).ToLocalChecked(),
+    Local<Value> stream = getGlobal("stream");
+    if (!stream->IsObject()) {
+        fprintf(stderr, "Failed to initialize http module: stream module is missing\n");
+        return;
+    }
+    Local<Value> readable = stream.As<Object>()->Get(context,
+        String::NewFromUtf8(isolate, "Readable").ToLocalChecked()).ToLocalChecked();
+
+    Local<Value> argv[6] = {
+        getGlobal("net"), binding, getGlobal("setTimeout"), getGlobal("clearTimeout"),
+        getGlobal("events"), readable,
     };
 
     Local<Value> http;
-    if (!factory.As<Function>()->Call(context, Undefined(isolate), 4, argv).ToLocal(&http)) {
-        ReportSetupError(isolate, try_catch);
+    if (!frogjs::RunJsModule(isolate, context, "http", kHttpSource, 6, argv).ToLocal(&http)) {
         return;
     }
 

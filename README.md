@@ -14,6 +14,7 @@
 - **Event-Driven I/O**: Non-blocking operations powered by libuv
 - **Module System**: CommonJS-style `require()` with caching and relative path support
 - **HTTP Server & Client**: Node-compatible `http` module (keep-alive, chunked encoding, pipelining)
+- **Events & Streams**: Node-compatible `EventEmitter` and `stream` module (Readable, Writable, Transform, pipe with backpressure)
 - **TCP Networking**: Built-in TCP server and client functionality
 - **File System**: Both sync and async file operations
 - **Timer API**: setTimeout, setInterval, clearTimeout, clearInterval
@@ -54,7 +55,7 @@ Prebuilt binaries are published on the [Releases page](https://github.com/dev-fr
 ```bash
 brew install v8 libuv   # runtime dependencies (linked dynamically)
 
-VERSION=0.4.0   # pick a version from the Releases page
+VERSION=0.5.0   # pick a version from the Releases page
 curl -LO https://github.com/dev-frog/frogJs/releases/download/v$VERSION/frogjs-$VERSION-macos-arm64.tar.gz
 curl -LO https://github.com/dev-frog/frogJs/releases/download/v$VERSION/frogjs-$VERSION-macos-arm64.tar.gz.sha256
 shasum -a 256 -c frogjs-$VERSION-macos-arm64.tar.gz.sha256
@@ -124,6 +125,30 @@ http.get('http://localhost:3000/hello', (res) => {
 });
 ```
 
+### Events & Streams
+```javascript
+const http = require('http');
+const EventEmitter = require('events');
+const { Transform, pipeline } = require('stream');
+
+const bus = new EventEmitter();
+bus.on('upload', (bytes) => console.log(`received ${bytes} characters`));
+
+// Stream each request body back upper-cased, with backpressure handled by pipeline()
+http.createServer((req, res) => {
+    let size = 0;
+    const upper = new Transform({
+        transform(chunk, encoding, callback) {
+            size += chunk.length;
+            callback(null, String(chunk).toUpperCase());
+        },
+    });
+    pipeline(req, upper, res, (err) => {
+        if (!err) bus.emit('upload', size);
+    });
+}).listen(3000);
+```
+
 ### TCP Server
 Create a simple TCP server:
 ```javascript
@@ -181,6 +206,9 @@ Check out the `examples/` directory for more samples:
 - `examples/http-server.js` - HTTP server with basic routing
 - `examples/http-client.js` - HTTP client (GET and POST)
 - `examples/test-http.js` - HTTP module self-test
+- `examples/events-streams.js` - EventEmitter, Transform and HTTP streaming demo
+- `examples/test-events.js` - Events module self-test
+- `examples/test-streams.js` - Stream module self-test
 - `examples/tcp-server.js` - TCP server implementation
 - `examples/tcp-client.js` - TCP client implementation
 - `examples/modules/` - Module system examples
@@ -210,13 +238,17 @@ frogjs/
 │       ├── timers.cpp       # Timer API
 │       ├── fs.cpp           # File system API
 │       ├── net.cpp          # TCP networking
+│       ├── events.cpp       # EventEmitter (embedded JS)
+│       ├── stream.cpp       # Readable/Writable/Duplex/Transform (embedded JS)
 │       ├── http.cpp         # HTTP server & client (JS on top of net)
 │       ├── path.cpp         # Path utilities
 │       ├── os.cpp           # OS information
 │       └── modules.cpp      # Module system
+│   └── utils/
+│       └── js_module.cpp    # Loader for modules written in embedded JS
 ├── examples/                # Example scripts
 ├── docs/                    # Documentation
-├── include/frogjs/          # Shared headers (V8 compat, Buffer)
+├── include/frogjs/          # Shared headers (V8 compat, Buffer, JS module loader)
 ├── Makefile                 # Build configuration
 ├── CMakeLists.txt          # CMake build (in development)
 ├── README.md               # This file
@@ -235,6 +267,8 @@ frogjs/
 - File system operations (sync & async)
 - TCP server/client networking
 - HTTP server/client (http.createServer, http.request, http.get)
+- Events module (EventEmitter, events.once, events.on)
+- Streams (Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished)
 - Module system (require, exports, caching)
 - Error handling with stack traces
 - Process object (argv, env, exit, cwd, pid, platform)
@@ -245,7 +279,7 @@ frogjs/
 - Automated release builds via GitHub Actions
 
 ### Planned
-- Events & Streams
+- File streams (fs.createReadStream / fs.createWriteStream)
 - REPL mode
 - Worker threads
 - Windows support
@@ -299,15 +333,15 @@ Start a release in either of these ways:
 
 ```bash
 # 1. Push a tag (via the helper script or directly)
-./release.sh v0.4.0
-git tag -a v0.4.0 -m "Release v0.4.0" && git push origin v0.4.0
+./release.sh v0.5.0
+git tag -a v0.5.0 -m "Release v0.5.0" && git push origin v0.5.0
 
 # 2. Trigger from GitHub (the workflow creates the tag for you)
-gh workflow run release.yml -f version=v0.4.0
+gh workflow run release.yml -f version=v0.5.0
 #    or: Actions → Release → Run workflow
 ```
 
-Versions with a suffix such as `v0.4.0-rc.1` are published as pre-releases.
+Versions with a suffix such as `v0.5.0-rc.1` are published as pre-releases.
 CI for pushes and pull requests runs separately in [`.github/workflows/build.yml`](.github/workflows/build.yml).
 See [RELEASE_GUIDE.md](RELEASE_GUIDE.md) for details.
 
@@ -340,9 +374,9 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Version**: 0.4.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
+**Version**: 0.5.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
 **Status**: Active Development
-**Last Updated**: 2026-10-06
+**Last Updated**: 2026-10-16
 
 ## Support 🐸
 

@@ -55,7 +55,7 @@ FrogJS is a lightweight JavaScript runtime built on V8 and libuv, providing Node
 - **Relative Paths**: Support for `./` and `../` imports
 - **Index Files**: Automatic `index.js` resolution
 - **File Extension Resolution**: `.js` extension auto-detection
-- **Built-in Modules**: `require('fs')`, `require('net')`, `require('http')`, `require('path')`, `require('os')`
+- **Built-in Modules**: `require('fs')`, `require('net')`, `require('http')`, `require('path')`, `require('os')`, `require('events')`, `require('stream')`
 
 ### 7. Path API
 POSIX path utilities matching Node.js `path.posix` (available as global `path` or `require('path')`)
@@ -83,14 +83,15 @@ HTTP/1.1 server and client (available as global `http` or `require('http')`), wr
   - `server.closeIdleConnections()`, `server.closeAllConnections()`
   - `server.keepAliveTimeout` (5s), `server.headersTimeout` (60s)
   - Events: `request`, `listening`, `connection`, `close`, `error`, `clientError`, `checkContinue`
-- **IncomingMessage** (`req` on the server, `res` on the client)
+- **IncomingMessage** (`req` on the server, `res` on the client) - a `stream.Readable`, so it can be piped and read with `for await`
   - `method`, `url`, `statusCode`, `statusMessage`, `headers` (lower-cased), `rawHeaders`, `trailers`, `httpVersion`, `socket`
   - Events: `data` (UTF-8 strings; `setEncoding('latin1')` for raw bytes), `end`, `aborted`, `close`
-  - Body chunks are buffered until a `data` listener is attached or `resume()` is called
+  - Body chunks are buffered until a `data` listener is attached, `resume()` is called or it is piped
 - **ServerResponse**
   - `statusCode`, `statusMessage`, `setHeader()`, `getHeader()`, `getHeaders()`, `hasHeader()`, `removeHeader()`
   - `writeHead(status[, message][, headers])`, `write(chunk)`, `end([chunk][, callback])`, `writeContinue()`
-  - `headersSent`, `finished`; events `finish`, `close`
+  - `headersSent`, `finished`, `destroy()`; events `finish`, `close`
+  - Works as a `pipe()`/`pipeline()` destination (`write()` always returns `true`: no backpressure yet)
 - **Client**: `http.request(url | options[, options][, callback])`, `http.get(...)`
   - Options: `hostname`/`host`, `port`, `path`, `method`, `headers`, `timeout`
   - `req.write()`, `req.end()`, `req.setHeader()`, `req.setTimeout()`, `req.destroy()`, `req.abort()`
@@ -106,7 +107,38 @@ HTTP/1.1 server and client (available as global `http` or `require('http')`), wr
   - Requests with both Content-Length and Transfer-Encoding are rejected (request smuggling)
   - CR/LF in header names, values and request paths are rejected (header injection)
 - `http.METHODS`, `http.STATUS_CODES`
+- All HTTP classes are `EventEmitter`s (listener exceptions are reported rather than thrown, so a throwing handler gets a `500`)
 - **Limitations**: plain HTTP only (no HTTPS), and the client opens one connection per request (no Agent/pooling)
+
+### 10. Events API
+Node.js-compatible `EventEmitter` (`require('events')`, also the global `events`)
+- `on` / `addListener`, `once`, `prependListener`, `prependOnceListener`
+- `off` / `removeListener`, `removeAllListeners([name])`
+- `emit(name, ...args)` - returns whether there were listeners; listener exceptions propagate
+- `listeners()`, `rawListeners()`, `listenerCount(name[, listener])`, `eventNames()`
+- `setMaxListeners(n)`, `getMaxListeners()`, `EventEmitter.defaultMaxListeners` (10, with a leak warning)
+- Special events: `'error'` (throws when unhandled), `'newListener'`, `'removeListener'`, `EventEmitter.errorMonitor`
+- `events.once(emitter, name)` - Promise of the next event; `events.on(emitter, name)` - async iterator
+- Supports `class X extends EventEmitter`, `EventEmitter.call(this)` and string or symbol event names
+
+### 11. Stream API
+Node.js-style streams (`require('stream')`, also the global `stream`)
+- **Readable**: `push()`, `unshift()`, `read([n])`, `pause()`, `resume()`, `isPaused()`, `setEncoding()`, `pipe()`, `unpipe()`, `destroy()`
+  - Flowing (`'data'`) and paused (`'readable'` + `read()`) modes, `for await...of`, `Readable.from(iterable)`
+  - Events: `data`, `readable`, `end`, `close`, `error`, `pause`, `resume`
+- **Writable**: `write()`, `end()`, `cork()`, `uncork()`, `setDefaultEncoding()`, `destroy()`; `_write`, `_writev`, `_final`
+  - Events: `drain`, `finish`, `close`, `error`, `pipe`, `unpipe`
+- **Duplex**, **Transform** (`_transform`, `_flush`) and **PassThrough**
+- Options: `highWaterMark`, `objectMode`, `encoding`, `emitClose`, `autoDestroy`, `allowHalfOpen`, plus `read`/`write`/`writev`/`final`/`transform`/`flush`/`destroy` implementations
+- **Backpressure**: `write()` returns `false` at the `highWaterMark` and `'drain'` follows; `pipe()` pauses the source until then
+- `stream.pipeline(...streams, callback)` - pipe a chain, destroying every stream if one fails
+- `stream.finished(stream[, options], callback)` - notification when a stream ends, finishes, errors or closes early
+- `stream.promises.pipeline()` / `stream.promises.finished()`
+- **Differences from Node.js**: strings reach `_write()` as strings and their `highWaterMark` length is counted in characters; `setEncoding()` supports `utf8`, `latin1`/`binary`, `ascii` and `hex`
+
+### 12. Buffer
+- `Buffer.alloc(size)`, `Buffer.from(string | array)`, `Buffer.byteLength(string)`, `Buffer.concat(list[, totalLength])`, `Buffer.isBuffer(value)`
+- `buf.toString()`, `buf.write(string[, offset])`, `buf.slice([start][, end])`, `buf.length`
 
 ## 📖 Usage Examples
 
@@ -231,6 +263,41 @@ path.basename('/a/b/file.js', '.js');    // 'file'
 path.extname('archive.tar.gz');          // '.gz'
 ```
 
+### Events
+```javascript
+const EventEmitter = require('events');
+
+class Job extends EventEmitter {}
+const job = new Job();
+job.on('progress', (pct) => console.log(`${pct}%`));
+job.once('done', () => console.log('finished'));
+job.emit('progress', 50);
+job.emit('done');
+```
+
+### Streams
+```javascript
+const http = require('http');
+const { Readable, Transform, pipeline } = require('stream');
+
+// In an HTTP server: stream the request body back, upper-cased
+http.createServer((req, res) => {
+    const upper = new Transform({
+        transform(chunk, encoding, callback) {
+            callback(null, String(chunk).toUpperCase());
+        },
+    });
+    pipeline(req, upper, res, (err) => {
+        if (err) console.error(err.message);
+    });
+}).listen(3000);
+
+// Iterate any readable
+(async () => {
+    for await (const chunk of Readable.from(['a', 'b', 'c'])) console.log(chunk);
+})();
+```
+
 ### OS
 ```javascript
 const os = require('os');
@@ -267,12 +334,14 @@ console.log('Home:', os.homedir());
 - Additional FS operations (mkdir, rmdir, stat, readdir, unlink, existsSync)
 - Path module
 - OS module
+- Events module (EventEmitter)
+- Streams (Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished)
 
 ### In Progress 🔨
 - None currently
 
 ### Planned Features ⏳
-- Events & Streams
+- `fs.createReadStream` / `fs.createWriteStream`
 - REPL mode
 - Worker threads
 - Native ESM support (import/export)

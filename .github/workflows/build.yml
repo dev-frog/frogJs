@@ -54,6 +54,8 @@ jobs:
         echo "Testing FrogJS basic functionality..."
         ./build/frogjs examples/hello.js
         ./build/frogjs examples/test-http.js
+        ./build/frogjs examples/test-events.js
+        ./build/frogjs examples/test-streams.js
 
     - name: Upload build artifact
       if: success()
