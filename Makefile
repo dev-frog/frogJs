@@ -45,6 +45,8 @@ SRCS = $(SRC_DIR)/core/runtime.cpp \
        $(SRC_DIR)/bindings/modules.cpp \
        $(SRC_DIR)/bindings/util.cpp \
        $(SRC_DIR)/bindings/crypto.cpp \
+       $(SRC_DIR)/bindings/child_process.cpp \
+       $(SRC_DIR)/bindings/worker_threads.cpp \
        $(SRC_DIR)/utils/js_module.cpp \
        $(SRC_DIR)/utils/errors.cpp \
        $(SRC_DIR)/utils/encoding.cpp \
@@ -56,6 +58,9 @@ OBJS = $(SRCS:.cpp=.o)
 # The hash functions are hot loops (PBKDF2 runs them 100k+ times): optimize them
 # even though the rest of the build is unoptimized
 $(SRC_DIR)/utils/hash.o: CXXFLAGS += -O2
+
+# Subclasses V8's ValueSerializer delegates, and libv8 is built without RTTI
+$(SRC_DIR)/bindings/worker_threads.o: CXXFLAGS += -fno-rtti
 
 # Default target
 all: $(TARGET)

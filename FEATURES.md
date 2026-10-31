@@ -163,7 +163,25 @@ Node.js-style streams (`require('stream')`, also the global `stream`)
 - Errors use Node.js codes and messages (`ERR_CRYPTO_HASH_FINALIZED`, `ERR_CRYPTO_INVALID_DIGEST`, `ERR_INVALID_ARG_TYPE`, `ERR_OUT_OF_RANGE`, ...)
 - **Not included**: ciphers, signatures, key objects, `scrypt`, Web Crypto `subtle`
 
-### 15. REPL & Command Line
+### 15. Child Process API
+`require('child_process')`. Behaves like Node.js (events, errors and messages are the same).
+- `spawn(command[, args][, options])` - returns a `ChildProcess`: `pid`, `stdin` (Writable), `stdout`/`stderr` (Readable), `stdio`, `exitCode`, `signalCode`, `killed`, `kill([signal])`, `ref()`/`unref()`; events `spawn`, `exit`, `close`, `error`
+  - Options: `cwd`, `env`, `argv0`, `stdio` (`'pipe'`, `'inherit'`, `'ignore'`, a file descriptor, or an array of these), `shell`, `detached`, `uid`, `gid`, `timeout`, `killSignal`
+- `exec(command[, options][, callback])` and `execFile(file[, args][, options][, callback])` - buffered output; `encoding`, `timeout`, `maxBuffer`, `killSignal`; `util.promisify()` gives `{ stdout, stderr }`
+- `spawnSync()`, `execSync()`, `execFileSync()` - block until the child exits; `input`, `timeout`, `maxBuffer`, `encoding`, `stdio`; failures throw `Command failed: ...` errors with `status`, `signal`, `stdout`, `stderr`
+- **Not included**: `fork()` and IPC (`stdio: 'ipc'`, `child.send()`), `AbortSignal` options
+
+### 16. Worker Threads API
+`require('worker_threads')`. Each `Worker` runs in its own V8 isolate with its own event loop, on its own thread.
+- `new Worker(filename | code, { eval, workerData, argv, transferList })` - `postMessage()`, `terminate()` (Promise of the exit code), `ref()`/`unref()`, `threadId`; events `online`, `message`, `error`, `exit`
+- `isMainThread`, `parentPort`, `workerData`, `threadId`
+- `MessageChannel`, `MessagePort` (`postMessage(value[, transferList])`, `on('message')`, `onmessage`, `start()`, `close()`, `ref()`/`unref()`), `receiveMessageOnPort(port)`
+- Messages are structured clones (objects, arrays, Map, Set, Date, RegExp, BigInt, Error, typed arrays, Buffers as `Uint8Array`)
+- `SharedArrayBuffer` memory is shared between threads (use `Atomics`); `ArrayBuffer`s and `MessagePort`s can be transferred
+- Uncaught errors in a worker become its `error` event; `process.exit()` in a worker ends only that worker
+- **Not included**: `resourceLimits`, `worker.stdout`/`stderr` streams (worker output goes straight to the process's), `BroadcastChannel`, ES module workers
+
+### 17. REPL & Command Line
 - `frogjs` with no script (and a terminal) starts the REPL
   - Line editing (arrows, Home/End, Ctrl+A/E/B/F/K/U/W/L, Alt+B/F), history in `~/.frogjs_repl_history` (`FROGJS_REPL_HISTORY`), tab completion
   - Multi-line input, `{ ... }` evaluated as an object literal, colored results (disable with `NO_COLOR`)
@@ -371,6 +389,8 @@ console.log('Home:', os.homedir());
 - Streams (Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished)
 - Util module (inspect, format)
 - Crypto module (hashes, HMAC, PBKDF2, random values)
+- Child processes (spawn, exec, execSync, stdio streams)
+- Worker threads (message passing, SharedArrayBuffer)
 - REPL and command-line options
 
 ### In Progress 🔨
@@ -378,8 +398,7 @@ console.log('Home:', os.homedir());
 
 ### Planned Features ⏳
 - `fs.createReadStream` / `fs.createWriteStream`
-- Child processes
-- Worker threads
+- `child_process.fork()` with IPC
 - Native ESM support (import/export)
 - TypeScript definitions
 
@@ -416,6 +435,8 @@ Run example scripts to test features:
 # Util, CLI & REPL
 ./build/frogjs examples/test-util.js
 ./build/frogjs examples/test-crypto.js
+./build/frogjs examples/test-child-process.js
+./build/frogjs examples/test-worker-threads.js
 ./examples/test-cli.sh
 ```
 
@@ -450,4 +471,4 @@ FrogJS aims for CommonJS compatibility but is not fully Node.js compatible. Focu
 ---
 
 **Last Updated**: 2026-10-31
-**Version**: 0.7.0 (Development)
+**Version**: 0.8.0 (Development)

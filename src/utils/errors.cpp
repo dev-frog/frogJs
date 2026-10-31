@@ -1,5 +1,6 @@
 #include "frogjs/errors.h"
 #include "frogjs/util.h"
+#include "frogjs/worker.h"
 #include <cstdio>
 #include <string>
 
@@ -33,9 +34,13 @@ static void PrintSourceExcerpt(Isolate* isolate, Local<Context> context, Local<M
 }
 
 void ReportException(Isolate* isolate, TryCatch* try_catch, bool show_source) {
+    // Termination (process.exit() or terminate() in a worker) is not an error
+    if (try_catch->HasTerminated()) return;
+
     HandleScope handle_scope(isolate);
     Local<Context> context = isolate->GetCurrentContext();
     Local<Value> exception = try_catch->Exception();
+    if (ForwardWorkerError(isolate, exception)) return;
 
     Local<Message> message = try_catch->Message();
     if (show_source && !message.IsEmpty()) {

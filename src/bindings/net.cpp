@@ -2,6 +2,7 @@
 #include "frogjs/v8_compat.h"
 #include "frogjs/buffer.h"
 #include <uv.h>
+#include "frogjs/loop.h"
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -51,7 +52,7 @@ static ConnectionData* NewConnection(Isolate* isolate) {
     conn->resolving = false;
     conn->freeAfterResolve = false;
     conn->connect = nullptr;
-    uv_tcp_init(uv_default_loop(), &conn->handle);
+    uv_tcp_init(frogjs::Loop(), &conn->handle);
     conn->handle.data = conn;
     return conn;
 }
@@ -635,7 +636,7 @@ void CreateServer(const FunctionCallbackInfo<Value>& args) {
     serverData->closing = false;
     serverData->handle.data = serverData;
 
-    uv_tcp_init(uv_default_loop(), &serverData->handle);
+    uv_tcp_init(frogjs::Loop(), &serverData->handle);
 
     // Create server object
     Local<ObjectTemplate> serverTemplate = ObjectTemplate::New(isolate);
@@ -684,7 +685,7 @@ static void ConnectAttemptFailed(ConnectRequest* cr, int status) {
             OnConnectionClosed(handle);
             return;
         }
-        uv_tcp_init(uv_default_loop(), &conn->handle);
+        uv_tcp_init(frogjs::Loop(), &conn->handle);
         conn->handle.data = conn;
         TryConnect(conn->connect);
     });
@@ -830,7 +831,7 @@ void NetConnect(const FunctionCallbackInfo<Value>& args) {
     hints.ai_socktype = SOCK_STREAM;
 
     std::string portStr = std::to_string(port);
-    int result = uv_getaddrinfo(uv_default_loop(), req, OnResolved, host.c_str(), portStr.c_str(), &hints);
+    int result = uv_getaddrinfo(frogjs::Loop(), req, OnResolved, host.c_str(), portStr.c_str(), &hints);
     if (result != 0) {
         delete req;
         CloseConnection(conn);

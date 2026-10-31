@@ -1,5 +1,6 @@
 #include <v8.h>
 #include <uv.h>
+#include "frogjs/loop.h"
 #include <cstring>
 #include <memory>
 #include <string>
@@ -321,7 +322,7 @@ struct DigestHandle {
     Global<Object> object;
 };
 
-Persistent<ObjectTemplate> g_handle_template;
+thread_local Persistent<ObjectTemplate> g_handle_template;
 
 void OnHandleCollected(const WeakCallbackInfo<DigestHandle>& info) {
     DigestHandle* handle = info.GetParameter();
@@ -477,7 +478,7 @@ void Pbkdf2(const FunctionCallbackInfo<Value>& args) {
     work->context.Reset(isolate, context);
     work->callback.Reset(isolate, args[5].As<Function>());
     work->req.data = work.get();
-    uv_queue_work(uv_default_loop(), &work->req,
+    uv_queue_work(frogjs::Loop(), &work->req,
         [](uv_work_t* req) {
             Pbkdf2Work* w = static_cast<Pbkdf2Work*>(req->data);
             w->result = frogjs::Pbkdf2(w->name, w->password, w->salt, w->iterations, w->key_length);
@@ -520,7 +521,7 @@ void RandomBytes(const FunctionCallbackInfo<Value>& args) {
     work->callback.Reset(isolate, args[1].As<Function>());
     work->bytes.assign(size, '\0');
     work->req.data = work.get();
-    int status = uv_random(uv_default_loop(), &work->req, &work->bytes[0], size, 0,
+    int status = uv_random(frogjs::Loop(), &work->req, &work->bytes[0], size, 0,
         [](uv_random_t* req, int status, void*, size_t) {
             std::unique_ptr<RandomWork> w(static_cast<RandomWork*>(req->data));
             CallBack(w->isolate, w->context, w->callback, status, w->bytes);

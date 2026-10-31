@@ -21,7 +21,9 @@ MaybeLocal<Value> RunJsModule(Isolate* isolate, Local<Context> context, const ch
     if (!Script::Compile(context, code, &origin).ToLocal(&script) ||
         !script->Run(context).ToLocal(&factory) || !factory->IsFunction() ||
         !factory.As<Function>()->Call(context, Undefined(isolate), argc, argv).ToLocal(&result)) {
-        if (try_catch.HasCaught()) {
+        if (try_catch.HasTerminated()) {
+            // A worker stopped while it was starting up: not an error
+        } else if (try_catch.HasCaught()) {
             String::Utf8Value error(isolate, try_catch.Exception());
             fprintf(stderr, "Failed to initialize %s module: %s\n", name, *error);
         } else {

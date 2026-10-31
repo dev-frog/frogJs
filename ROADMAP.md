@@ -1,6 +1,6 @@
 # FrogJS Development Roadmap
 
-## 📊 Current Status: Version 0.7.0
+## 📊 Current Status: Version 0.8.0
 
 ### ✅ Completed (v0.1.0)
 - Core V8 runtime integration
@@ -51,6 +51,13 @@
 - `randomBytes`, `randomInt`, `randomUUID`, `getRandomValues`, `timingSafeEqual`, `getHashes`
 - Hash and Hmac objects are Transform streams (`source.pipe(hash)`)
 - Buffer encodings: `hex`, `base64`, `base64url`, `latin1`/`binary`, `ascii` in `Buffer.from`, `buf.toString([encoding[, start[, end]]])` and `Buffer.byteLength`; `Buffer.from(buffer | TypedArray | ArrayBuffer)`
+
+### ✅ Completed (v0.8.0)
+- Child process module: `spawn`, `exec`, `execFile`, `spawnSync`, `execSync`, `execFileSync`, `ChildProcess`
+- Child stdio as streams (`child.stdin` Writable, `child.stdout`/`stderr` Readable), `stdio` pipe/inherit/ignore/fd, `shell`, `cwd`, `env`, `timeout`, `killSignal`, `maxBuffer`, `input`, `kill()`; `util.promisify(exec)` resolves `{ stdout, stderr }`
+- Worker threads module: `Worker` (file or `eval`), `isMainThread`, `parentPort`, `workerData`, `threadId`, `MessageChannel`, `MessagePort`, `receiveMessageOnPort`
+- Structured-clone message passing; `SharedArrayBuffer` + `Atomics` shared between threads; transferable `ArrayBuffer`s and `MessagePort`s
+- `process.stdout` / `process.stderr` streams; `util.promisify.custom`
 
 ---
 
@@ -317,7 +324,7 @@ void SetupCrypto(Isolate* isolate, Local<Context> context);
 
 ---
 
-### Version 0.8.0 - Advanced Features
+### Version 0.8.0 - Advanced Features ✅ Completed
 
 **Priority: LOW**
 **Estimated Effort: 4-6 weeks**
@@ -337,6 +344,15 @@ void SetupCrypto(Isolate* isolate, Local<Context> context);
 - Basic threading support
 - Message passing between workers
 - SharedArrayBuffer support
+
+**Implementation Notes:**
+- `spawn()` uses `uv_spawn` with libuv pipes wrapped as `stream.Readable`/`Writable`; the `*Sync` functions run the child on a private libuv loop, so timers and I/O of the main loop are not run while they block (as in Node.js). Events (`spawn`, `exit`, `close`, `error`), error objects (`spawn x ENOENT`, `Command failed: ...`, `ETIMEDOUT`, `ENOBUFS`) and argument errors match Node.js; `examples/test-child-process.js` passes under both runtimes
+- Each `Worker` is a thread with its own V8 isolate, context and libuv loop. Per-thread state that used to be global (the event loop, timers, the module cache, cached templates) is now `thread_local`, and bindings use `frogjs::Loop()` instead of `uv_default_loop()`
+- Messages are serialized with V8's `ValueSerializer` (structured clone: Map, Set, Date, RegExp, BigInt, Error, typed arrays, ...). `SharedArrayBuffer` backing stores are shared, transferred `ArrayBuffer`s are detached, and `MessagePort`s can be transferred to other threads. Buffers arrive as `Uint8Array`, as in Node.js
+- Uncaught errors in a worker (also in its callbacks) end the worker and become the `Worker`'s `error` event, with properties such as `err.code` kept; `process.exit()` in a worker ends only that worker; `terminate()` interrupts running JavaScript. Unref'd workers are stopped and joined before the process exits
+- `examples/test-worker-threads.js` passes under both runtimes; the new code was also run under AddressSanitizer
+- Differences from Node.js: the main script is not wrapped in a module function, so it can't `return` at the top level (workers started from a file run the same way); worker `stdout`/`stderr` write straight to the process's (no `worker.stdout` streams)
+- Not included: IPC (`fork()`, `stdio: 'ipc'`, `child.send()`), `AbortSignal` options, `resourceLimits`, `worker.getHeapSnapshot()`, `BroadcastChannel`, environment data, ES module workers
 
 ---
 
@@ -430,8 +446,8 @@ declare module 'http' { ... }
 - **v0.5.0**: ✅ Done
 - **v0.6.0**: ✅ Done
 - **v0.7.0**: ✅ Done
-- **v0.8.0**: 4-6 weeks (recommended immediate focus)
-- **v0.9.0**: 2-3 weeks
+- **v0.8.0**: ✅ Done
+- **v0.9.0**: 2-3 weeks (recommended immediate focus)
 - **v1.0.0**: 4-6 weeks
 
 **Total to v1.0.0**: ~6-9 months
@@ -440,17 +456,20 @@ declare module 'http' { ... }
 
 ## 🚀 Quick Start Recommendation
 
-Next up is **v0.8.0** (Child Process & Worker Threads). Smaller follow-ups that build on earlier versions:
+Next up is **v0.9.0** (TypeScript & Tooling). Smaller follow-ups that build on earlier versions:
 - `fs.createReadStream` / `fs.createWriteStream` on top of `stream.Readable`/`Writable`
 - Make `net` sockets `Duplex` streams so `socket.write()` reports backpressure (HTTP responses would inherit it)
 - Top-level `await` in the REPL; report unhandled promise rejections
 - `fs` callbacks receive error strings, not `Error` objects, and `fs.readFile` has no encoding argument
 - Free Buffer memory when a Buffer is garbage collected (`BufferFinalizer` is still a no-op, so long-running code that allocates Buffers, e.g. with `randomBytes`, grows)
 - Ciphers (`createCipheriv`/`createDecipheriv`, AES-GCM) and `scrypt`
+- `process.stdin` as a Readable stream, `process.nextTick`, `queueMicrotask`, `structuredClone` (the worker serializer can back it)
+- `child_process.fork()` with an IPC channel
+- Wrap the main script like a module (top-level `return`, absolute stack-trace paths)
 
 ```bash
 # Create implementation branch
-git checkout -b feature/child-process
+git checkout -b feature/typescript-definitions
 
 # Focus on one feature at a time
 # Test thoroughly with examples

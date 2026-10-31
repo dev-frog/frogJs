@@ -1,5 +1,6 @@
 #include <v8.h>
 #include <uv.h>
+#include "frogjs/loop.h"
 #include <fstream>
 #include <sstream>
 #include <sys/stat.h>
@@ -37,7 +38,7 @@ void ReadFileCallback(uv_fs_t* req) {
         // Success - read the file content
         uv_buf_t buffer = uv_buf_init(new char[req->result + 1], req->result);
         uv_fs_t read_req;
-        int bytes_read = uv_fs_read(uv_default_loop(), &read_req, req->result, &buffer, 1, 0, nullptr);
+        int bytes_read = uv_fs_read(frogjs::Loop(), &read_req, req->result, &buffer, 1, 0, nullptr);
 
         if (bytes_read >= 0) {
             buffer.base[bytes_read] = '\0';
@@ -50,7 +51,7 @@ void ReadFileCallback(uv_fs_t* req) {
 
         delete[] buffer.base;
         uv_fs_req_cleanup(&read_req);
-        uv_fs_close(uv_default_loop(), &read_req, req->result, nullptr);
+        uv_fs_close(frogjs::Loop(), &read_req, req->result, nullptr);
     }
 
     // Call the JavaScript callback
@@ -187,7 +188,7 @@ void ReadFile(const FunctionCallbackInfo<Value>& args) {
     file_req->callback.Reset(isolate, callback);
 
     // Open file asynchronously
-    int result = uv_fs_open(uv_default_loop(), &file_req->req, *path,
+    int result = uv_fs_open(frogjs::Loop(), &file_req->req, *path,
                            O_RDONLY, 0, ReadFileCallback);
 
     if (result < 0) {
@@ -224,7 +225,7 @@ void WriteFile(const FunctionCallbackInfo<Value>& args) {
 
     // Write using simpler approach: open, write, close
     uv_fs_t open_req;
-    int fd = uv_fs_open(uv_default_loop(), &open_req, *path,
+    int fd = uv_fs_open(frogjs::Loop(), &open_req, *path,
                         O_WRONLY | O_CREAT | O_TRUNC, 0644, nullptr);
     uv_fs_req_cleanup(&open_req);
 
@@ -238,13 +239,13 @@ void WriteFile(const FunctionCallbackInfo<Value>& args) {
     }
 
     uv_buf_t buffer = uv_buf_init(const_cast<char*>(file_req->data.c_str()), file_req->data.length());
-    int result = uv_fs_write(uv_default_loop(), &file_req->req, fd, &buffer, 1, -1, WriteFileCallback);
+    int result = uv_fs_write(frogjs::Loop(), &file_req->req, fd, &buffer, 1, -1, WriteFileCallback);
 
     if (result < 0) {
         file_req->callback.Reset();
         delete file_req;
         uv_fs_t close_req;
-        uv_fs_close(uv_default_loop(), &close_req, fd, nullptr);
+        uv_fs_close(frogjs::Loop(), &close_req, fd, nullptr);
         uv_fs_req_cleanup(&close_req);
         std::string error_msg = "Error writing file: ";
         error_msg += uv_strerror(result);
@@ -275,7 +276,7 @@ void MkdirSync(const FunctionCallbackInfo<Value>& args) {
     }
 
     uv_fs_t req;
-    int result = uv_fs_mkdir(uv_default_loop(), &req, *path, mode, nullptr);
+    int result = uv_fs_mkdir(frogjs::Loop(), &req, *path, mode, nullptr);
     uv_fs_req_cleanup(&req);
 
     if (result < 0) {
@@ -345,7 +346,7 @@ void Mkdir(const FunctionCallbackInfo<Value>& args) {
     file_req->filename = *path;
     file_req->callback.Reset(isolate, callback);
 
-    int result = uv_fs_mkdir(uv_default_loop(), &file_req->req, *path, mode, MkdirCallback);
+    int result = uv_fs_mkdir(frogjs::Loop(), &file_req->req, *path, mode, MkdirCallback);
 
     if (result < 0) {
         file_req->callback.Reset();
@@ -371,7 +372,7 @@ void ReaddirSync(const FunctionCallbackInfo<Value>& args) {
     String::Utf8Value path(isolate, args[0]);
 
     uv_fs_t req;
-    int result = uv_fs_scandir(uv_default_loop(), &req, *path, 0, nullptr);
+    int result = uv_fs_scandir(frogjs::Loop(), &req, *path, 0, nullptr);
 
     if (result < 0) {
         uv_fs_req_cleanup(&req);
@@ -462,7 +463,7 @@ void Readdir(const FunctionCallbackInfo<Value>& args) {
     file_req->filename = *path;
     file_req->callback.Reset(isolate, callback);
 
-    int result = uv_fs_scandir(uv_default_loop(), &file_req->req, *path, 0, ReaddirCallback);
+    int result = uv_fs_scandir(frogjs::Loop(), &file_req->req, *path, 0, ReaddirCallback);
 
     if (result < 0) {
         file_req->callback.Reset();
@@ -487,7 +488,7 @@ void RmdirSync(const FunctionCallbackInfo<Value>& args) {
     String::Utf8Value path(isolate, args[0]);
 
     uv_fs_t req;
-    int result = uv_fs_rmdir(uv_default_loop(), &req, *path, nullptr);
+    int result = uv_fs_rmdir(frogjs::Loop(), &req, *path, nullptr);
     uv_fs_req_cleanup(&req);
 
     if (result < 0) {
@@ -549,7 +550,7 @@ void Rmdir(const FunctionCallbackInfo<Value>& args) {
     file_req->filename = *path;
     file_req->callback.Reset(isolate, callback);
 
-    int result = uv_fs_rmdir(uv_default_loop(), &file_req->req, *path, RmdirCallback);
+    int result = uv_fs_rmdir(frogjs::Loop(), &file_req->req, *path, RmdirCallback);
 
     if (result < 0) {
         file_req->callback.Reset();
@@ -629,7 +630,7 @@ void StatSync(const FunctionCallbackInfo<Value>& args) {
     String::Utf8Value path(isolate, args[0]);
 
     uv_fs_t req;
-    int result = uv_fs_stat(uv_default_loop(), &req, *path, nullptr);
+    int result = uv_fs_stat(frogjs::Loop(), &req, *path, nullptr);
 
     if (result < 0) {
         uv_fs_req_cleanup(&req);
@@ -700,7 +701,7 @@ void Stat(const FunctionCallbackInfo<Value>& args) {
     file_req->filename = *path;
     file_req->callback.Reset(isolate, callback);
 
-    int result = uv_fs_stat(uv_default_loop(), &file_req->req, *path, StatCallback);
+    int result = uv_fs_stat(frogjs::Loop(), &file_req->req, *path, StatCallback);
 
     if (result < 0) {
         file_req->callback.Reset();
@@ -724,7 +725,7 @@ void ExistsSync(const FunctionCallbackInfo<Value>& args) {
     String::Utf8Value path(isolate, args[0]);
 
     uv_fs_t req;
-    int result = uv_fs_stat(uv_default_loop(), &req, *path, nullptr);
+    int result = uv_fs_stat(frogjs::Loop(), &req, *path, nullptr);
     uv_fs_req_cleanup(&req);
 
     args.GetReturnValue().Set(result >= 0);
@@ -748,7 +749,7 @@ void UnlinkSync(const FunctionCallbackInfo<Value>& args) {
     String::Utf8Value path(isolate, args[0]);
 
     uv_fs_t req;
-    int result = uv_fs_unlink(uv_default_loop(), &req, *path, nullptr);
+    int result = uv_fs_unlink(frogjs::Loop(), &req, *path, nullptr);
     uv_fs_req_cleanup(&req);
 
     if (result < 0) {
@@ -810,7 +811,7 @@ void Unlink(const FunctionCallbackInfo<Value>& args) {
     file_req->filename = *path;
     file_req->callback.Reset(isolate, callback);
 
-    int result = uv_fs_unlink(uv_default_loop(), &file_req->req, *path, UnlinkCallback);
+    int result = uv_fs_unlink(frogjs::Loop(), &file_req->req, *path, UnlinkCallback);
 
     if (result < 0) {
         file_req->callback.Reset();

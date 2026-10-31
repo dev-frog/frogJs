@@ -13,7 +13,7 @@ static const int BUFFER_DATA_FIELD = 0;
 static const int BUFFER_LENGTH_FIELD = 1;
 
 // Template behind the Buffer constructor, used by IsBuffer()
-static Persistent<FunctionTemplate> g_buffer_template;
+static thread_local Persistent<FunctionTemplate> g_buffer_template;
 
 bool IsBuffer(Local<Value> value) {
     if (g_buffer_template.IsEmpty() || !value->IsObject()) {

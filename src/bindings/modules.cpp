@@ -11,8 +11,8 @@
 
 using namespace v8;
 
-// Module cache: filepath -> exports object
-std::map<std::string, Persistent<Object>> moduleCache;
+// Module cache: filepath -> exports object (per thread: each worker has its own)
+thread_local std::map<std::string, Persistent<Object>> moduleCache;
 
 // Forget loaded modules (the REPL's .clear starts over with a fresh context)
 void ClearModuleCache() {
@@ -103,7 +103,8 @@ void Require(const FunctionCallbackInfo<Value>& args) {
     Local<Object> global = context->Global();
 
     // Built-in modules are exposed as globals; require() returns the same object
-    static const char* builtinModules[] = {"fs", "net", "http", "path", "os", "events", "stream", "util", "crypto"};
+    static const char* builtinModules[] = {"fs", "net", "http", "path", "os", "events", "stream", "util", "crypto",
+                                           "child_process", "worker_threads"};
     for (const char* name : builtinModules) {
         if (requestedPath == name) {
             args.GetReturnValue().Set(global->Get(context,
@@ -234,13 +235,19 @@ void SetupModules(Isolate* isolate, Local<Context> context, const std::string& m
         FunctionTemplate::New(isolate, Require)->GetFunction(context).ToLocalChecked()
     ).Check();
 
-    // Set __filename and __dirname for the main module
-    std::string mainDir = GetDirname(mainFilePath);
+    // Set __filename and __dirname for the main module: absolute, as in
+    // Node.js (pseudo names like "[eval]" stay as they are)
+    std::string mainFile = mainFilePath;
+    char resolved[PATH_MAX];
+    if (!mainFile.empty() && mainFile[0] != '[' && realpath(mainFile.c_str(), resolved)) {
+        mainFile = resolved;
+    }
+    std::string mainDir = GetDirname(mainFile);
 
     context->Global()->Set(
         context,
         String::NewFromUtf8(isolate, "__filename").ToLocalChecked(),
-        String::NewFromUtf8(isolate, mainFilePath.c_str()).ToLocalChecked()
+        String::NewFromUtf8(isolate, mainFile.c_str()).ToLocalChecked()
     ).Check();
 
     context->Global()->Set(

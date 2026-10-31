@@ -97,6 +97,16 @@ Arguments are formatted by `util.format` (`frogjs::Format`).
 #### Crypto (`src/bindings/crypto.cpp`, `src/utils/hash.cpp`)
 The algorithms (MD5, SHA-1, SHA-224/256/384/512, HMAC, PBKDF2) are plain C++ in `hash.cpp`, behind the `frogjs::Digest` interface (`include/frogjs/hash.h`). The Node-style API (`Hash`/`Hmac` Transform streams, argument validation) is embedded JavaScript in `crypto.cpp`, which holds each digest in a handle object whose weak callback frees it. Async `pbkdf2` runs on the libuv thread pool (`uv_queue_work`) and random bytes come from `uv_random()`. Byte encodings shared with `Buffer` live in `src/utils/encoding.cpp`.
 
+#### Child processes (`src/bindings/child_process.cpp`)
+`spawn()` calls `uv_spawn()`; each `'pipe'` stdio entry is a `uv_pipe_t` exposed to JavaScript as a small handle object (`readStart`, `write`, `shutdown`, `closePipe`), which the embedded JavaScript wraps in `stream.Readable`/`Writable`. The process handle calls `onexit(code, signal)` and is closed straight after. `spawnSync()` runs `uv_spawn()` on a private `uv_loop_t` that only holds the child, its pipes and the timeout timer, and returns once that loop is empty; `execSync()`/`execFileSync()` are JavaScript on top of it.
+
+#### Worker threads (`src/bindings/worker_threads.cpp`)
+Every JavaScript thread has its own isolate, context and libuv loop. `frogjs::Loop()` (`include/frogjs/loop.h`) returns the calling thread's loop (the default loop on the main thread), and per-isolate state in the bindings (timers, module cache, cached templates and functions) is `thread_local`. A worker thread runs `frogjs::CreateContext()` and `frogjs::ExecuteScript()` (`include/frogjs/runtime.h`) like the main thread, then its own loop.
+
+Messages are serialized with `v8::ValueSerializer` into a `Message` (bytes plus the `SharedArrayBuffer` backing stores, transferred `ArrayBuffer` backing stores and transferred ports). A channel is two `PortEndpoint`s, each with a queue; posting a message appends to the peer's queue and wakes the thread that owns the peer with `uv_async_send()`. An endpoint in transit has no owner, and queues messages until it is attached to a thread. The `Worker` object talks to its thread through one channel (its `parentPort`) and a second `uv_async_t` for `online`/`error`/`exit`.
+
+`terminate()` and `process.exit()` in a worker use `Isolate::TerminateExecution()` and stop the worker's loop; uncaught errors in a worker are forwarded to its `Worker` from `frogjs::ReportException()` (`include/frogjs/worker.h`). On exit the worker closes its ports and handles, disposes its isolate, and the parent joins the thread before emitting `'exit'`.
+
 #### Util (`src/bindings/util.cpp`)
 `util.inspect` and `util.format` are written in JavaScript embedded in the C++ file (like `events`, `stream` and `http`). A few native helpers are passed in for what JavaScript can't see: a `Proxy`'s target, a `Promise`'s state, boxed primitives and `Buffer` bytes. C++ code calls them through `include/frogjs/util.h`:
 ```cpp

@@ -10,6 +10,8 @@ Complete API documentation for FrogJS runtime and built-in modules.
 - [Util API](#util-api)
 - [Buffer Encodings](#buffer-encodings)
 - [Crypto API](#crypto-api)
+- [Child Process API](#child-process-api)
+- [Worker Threads API](#worker-threads-api)
 - [Timer API](#timer-api)
 - [File System API](#file-system-api)
 - [Network API](#network-api)
@@ -34,7 +36,7 @@ frogjs                                     # start the REPL
 | `-p`, `--print <script>` | Evaluate `script` and print the result like `console.log` would |
 | `-c`, `--check` | Compile the script (or stdin) without running it; exit code 1 on a syntax error |
 | `-i`, `--interactive` | Start the REPL even if stdin is not a terminal, after running the script or `--eval` code |
-| `-v`, `--version` | Print the version (`v0.7.0`) |
+| `-v`, `--version` | Print the version (`v0.8.0`) |
 | `-h`, `--help` | Print usage |
 | `-` | Read the script from stdin (the default when no script is given and stdin is not a terminal) |
 | `--` | End of options: the next argument is the script |
@@ -128,6 +130,9 @@ The directory name of the current module.
 ```javascript
 console.log(__dirname); // /path/to/current
 ```
+
+### `process.stdout`, `process.stderr`
+Writable streams for file descriptors 1 and 2 (`write()`, `fd`, `isTTY`). Writes are synchronous and ordered with `console.log`; `end()` doesn't close the descriptor, so `child.stdout.pipe(process.stdout)` is safe.
 
 ### `require(id)`
 Load modules from the file system or built-in modules.
@@ -1084,7 +1089,7 @@ Load modules.
 **Returns:** Module exports
 
 **Module Resolution:**
-1. Built-in modules: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`
+1. Built-in modules: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`, `child_process`, `worker_threads`
 2. Relative paths (`./`, `../`)
 3. Absolute paths
 4. Auto-append `.js` extension
@@ -1254,3 +1259,165 @@ console.log(math.add(1, 2)); // 3
 
 **Last Updated:** 2026-10-16
 **API Version:** 0.5.0
+
+---
+
+## Child Process API
+
+`require('child_process')` (also the global `child_process`). Errors, messages and events match Node.js.
+
+### `child_process.spawn(command[, args][, options])`
+Start `command` and return a `ChildProcess` straight away.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `cwd` | current directory | Working directory of the child (string or `file:` URL) |
+| `env` | `process.env` | Environment variables |
+| `argv0` | `command` | `argv[0]` seen by the child |
+| `stdio` | `'pipe'` | `'pipe'`, `'inherit'`, `'ignore'`, or an array with one entry per descriptor: one of those, a file descriptor number, or a stream with an `fd` (e.g. `process.stderr`) |
+| `shell` | `false` | `true` (`/bin/sh`) or a shell path: run `command` and `args` through the shell |
+| `detached` | `false` | Make the child the leader of a new process group |
+| `uid`, `gid` | | Run as this user / group |
+| `timeout` | | Milliseconds before the child is sent `killSignal` |
+| `killSignal` | `'SIGTERM'` | Signal for `timeout` |
+
+```javascript
+const { spawn } = require('child_process');
+const child = spawn('sh', ['-c', 'echo out; echo err >&2; exit 3']);
+child.stdout.on('data', (data) => console.log(`stdout: ${data}`));
+child.stderr.pipe(process.stderr);
+child.on('close', (code, signal) => console.log('exited', code, signal)); // exited 3 null
+```
+
+### ChildProcess
+- `child.pid` - process ID (`undefined` if spawning failed)
+- `child.stdin` - Writable stream (`null` unless stdio[0] is `'pipe'`); `end()` closes the child's input
+- `child.stdout`, `child.stderr` - Readable streams (`setEncoding()`, `pipe()`, `for await`)
+- `child.stdio` - `[stdin, stdout, stderr, ...]`
+- `child.exitCode`, `child.signalCode`, `child.killed`, `child.spawnfile`, `child.spawnargs`
+- `child.kill([signal])` - send a signal (default `'SIGTERM'`; name or number); returns `false` if the child has already exited
+- `child.ref()`, `child.unref()` - whether the child keeps the event loop alive
+
+Events:
+- `'spawn'` - the child started
+- `'exit'` `(code, signal)` - the child ended (one of the two is `null`)
+- `'close'` `(code, signal)` - after `'exit'` and the closing of all its stdio streams
+- `'error'` `(err)` - the child could not be started (`spawn ls ENOENT`, with `code`, `errno`, `syscall`, `path`, `spawnargs`) or killed
+
+### `child_process.exec(command[, options][, callback])`
+Run `command` in `/bin/sh` and buffer its output: `callback(err, stdout, stderr)`. On failure `err` is `Command failed: <command>\n<stderr>` with `code` (the exit code), `killed`, `signal` and `cmd`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `encoding` | `'utf8'` | Encoding of `stdout`/`stderr`; `'buffer'` for Buffers |
+| `timeout` | `0` | Kill the child after this many milliseconds |
+| `maxBuffer` | `1048576` | Bytes allowed on stdout or stderr before the child is killed (`ERR_CHILD_PROCESS_STDIO_MAXBUFFER`) |
+| `killSignal` | `'SIGTERM'` | Signal used by `timeout` and `maxBuffer` |
+| `cwd`, `env`, `shell`, `uid`, `gid` | | As for `spawn()` |
+
+```javascript
+const { exec } = require('child_process');
+exec('ls | wc -l', (err, stdout) => console.log(stdout.trim()));
+
+const util = require('util');
+const { stdout, stderr } = await util.promisify(exec)('git status --short');
+```
+
+### `child_process.execFile(file[, args][, options][, callback])`
+Like `exec()` but runs `file` directly, without a shell (unless `shell` is set).
+
+### `child_process.spawnSync(command[, args][, options])`
+Run the child and wait for it. Returns `{ pid, output, stdout, stderr, status, signal, error }`; `error` is set when the child could not be started (`ENOENT`), timed out (`ETIMEDOUT`) or produced more than `maxBuffer` bytes (`ENOBUFS`). Extra options: `input` (string or Buffer written to stdin), `encoding`, `maxBuffer` (default `1048576`).
+
+### `child_process.execSync(command[, options])`, `child_process.execFileSync(file[, args][, options])`
+Like `spawnSync()` but return stdout (a Buffer, or a string with `encoding`) and throw if the child fails: `Command failed: <command>` plus stderr, with `status`, `signal`, `output`, `pid`, `stdout` and `stderr`. Unless `stdio` is given, the child's stderr goes to the parent's stderr.
+
+```javascript
+const { execSync } = require('child_process');
+const branch = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
+const upper = execSync('tr a-z A-Z', { input: 'frog' }).toString(); // 'FROG'
+```
+
+Not supported: `fork()` and IPC channels (`stdio: 'ipc'`, `child.send()`), `signal` (AbortSignal) options.
+
+---
+
+## Worker Threads API
+
+`require('worker_threads')` (also the global `worker_threads`). A `Worker` runs JavaScript on another thread, in its own V8 isolate with its own event loop and its own copy of the built-in modules. Threads share no JavaScript objects: they communicate by message, and can share memory through `SharedArrayBuffer`.
+
+### `new Worker(filename[, options])`
+`filename` is an absolute path, a path starting with `./` or `../` (resolved against the current directory), or a `file:` URL. With `eval: true` it is the code to run.
+
+| Option | Description |
+|--------|-------------|
+| `eval` | `filename` is JavaScript code |
+| `workerData` | Any cloneable value; the worker's `require('worker_threads').workerData` |
+| `transferList` | `ArrayBuffer`s and `MessagePort`s in `workerData` to move instead of copy |
+| `argv` | Strings appended to the worker's `process.argv` |
+
+```javascript
+const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
+
+if (isMainThread) {
+    const worker = new Worker(__filename, { workerData: { start: 2 } });
+    worker.on('message', (result) => console.log('result', result)); // result 4
+    worker.on('error', (err) => console.error(err));
+    worker.on('exit', (code) => console.log('exit', code));           // exit 0
+} else {
+    parentPort.postMessage(workerData.start * 2);
+}
+```
+
+Worker methods and properties:
+- `worker.postMessage(value[, transferList])` - send a message to the worker's `parentPort`
+- `worker.terminate()` - stop the worker, even in the middle of running code; returns a Promise of the exit code (`1`)
+- `worker.ref()`, `worker.unref()` - whether the worker keeps this thread's event loop alive (a worker that is unref'd is stopped when the process exits)
+- `worker.threadId` - its thread ID (`-1` once it has exited)
+
+Events: `'online'`, `'message'` `(value)`, `'error'` `(err)` (an uncaught exception in the worker, which then exits with code 1), `'exit'` `(exitCode)`. Messages the worker sent before it ended arrive before `'exit'`.
+
+In the worker, `process.exit(code)` ends just the worker (its `'exit'` code is `code`). `console.log` writes straight to the process's stdout.
+
+### `isMainThread`, `threadId`, `parentPort`, `workerData`
+- `isMainThread` - `false` inside a worker
+- `threadId` - `0` on the main thread, a unique number in each worker
+- `parentPort` - inside a worker, the `MessagePort` connected to the `Worker` object (`null` on the main thread). A `'message'` listener on it keeps the worker running until `parentPort.close()` or `worker.terminate()`
+- `workerData` - a clone of the `workerData` option (`null` on the main thread)
+
+### `MessageChannel`, `MessagePort`
+`new MessageChannel()` creates two connected ports, `port1` and `port2`. A port can be transferred to another thread (put it in a message and in the transfer list) and used there.
+
+- `port.postMessage(value[, transferList])` - send to the other port
+- `port.on('message', listener)` / `port.onmessage = (event) => event.data` - receive; adding a listener starts delivery
+- `port.start()`, `port.close()` (the other port also closes; both emit `'close'`), `port.ref()`, `port.unref()`, `port.hasRef()`
+
+```javascript
+const { Worker, MessageChannel } = require('worker_threads');
+const { port1, port2 } = new MessageChannel();
+const worker = new Worker(`
+    require('worker_threads').parentPort.once('message', ({ port }) => port.postMessage('hello from the worker'));
+`, { eval: true });
+worker.postMessage({ port: port2 }, [port2]);
+port1.once('message', (message) => { console.log(message); port1.close(); });
+```
+
+### `receiveMessageOnPort(port)`
+Take the next queued message synchronously: `{ message }`, or `undefined` if there is none.
+
+### What can be sent
+Messages are copied with the structured clone algorithm: primitives (including `BigInt`), plain objects, arrays, `Map`, `Set`, `Date`, `RegExp`, `Error`s, `ArrayBuffer`s and typed arrays. Buffers arrive as `Uint8Array`s and class instances as plain objects. Functions and native objects can't be sent (`DataCloneError`).
+
+- **`SharedArrayBuffer`** - not copied: both threads see the same memory. Use `Atomics` to synchronize.
+- **Transfer list** - `ArrayBuffer`s listed are moved (the sender's copy is detached, with `byteLength` 0); `MessagePort`s must be listed to be sent.
+
+```javascript
+const shared = new Int32Array(new SharedArrayBuffer(4));
+const worker = new Worker(`
+    const { workerData } = require('worker_threads');
+    Atomics.add(new Int32Array(workerData), 0, 10);
+`, { eval: true, workerData: shared.buffer });
+worker.on('exit', () => console.log(Atomics.load(shared, 0))); // 10
+```
+
+Not supported: `resourceLimits`, `worker.stdout`/`worker.stderr`/`worker.stdin`, `BroadcastChannel`, `setEnvironmentData`, ES module workers.

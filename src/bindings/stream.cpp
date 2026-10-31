@@ -1,6 +1,12 @@
 #include <v8.h>
+#include <cstdio>
+#include <string>
+#include <unistd.h>
 #include "frogjs/buffer.h"
+#include "frogjs/encoding.h"
 #include "frogjs/js_module.h"
+#include "frogjs/loop.h"
+#include "frogjs/repl.h"
 
 using namespace v8;
 
@@ -1683,6 +1689,74 @@ return Stream;
 })
 )JS";
 
+// process.stdout and process.stderr: Writable streams over fd 1 and 2. Writes
+// are synchronous (through the same stdio buffers console.log uses, so output
+// stays in order).
+static const char* kProcessStdioSource = R"JS(
+(function (stream, native) {
+'use strict';
+function stdioStream(fd) {
+  const s = new stream.Writable({
+    write(chunk, encoding, callback) {
+      native.writeStdio(fd, chunk);
+      callback();
+    },
+  });
+  s.fd = fd;
+  s.isTTY = native.isatty(fd);
+  // Closing the process's stdout would break console.log
+  s._destroy = (err, callback) => callback(err);
+  s.end = function (chunk, encoding, callback) {
+    if (typeof chunk === 'function') return chunk();
+    if (chunk !== undefined && chunk !== null) this.write(chunk, encoding);
+    if (typeof encoding === 'function') encoding();
+    else if (typeof callback === 'function') callback();
+    return this;
+  };
+  return s;
+}
+return [stdioStream(1), stdioStream(2)];
+})
+)JS";
+
+// writeStdio(fd, chunk): write a string or Buffer to stdout (1) or stderr (2)
+static void WriteStdio(const FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    int fd = args[0]->Int32Value(isolate->GetCurrentContext()).FromMaybe(1);
+    std::string bytes;
+    if (args[1]->IsString()) {
+        bytes = frogjs::DecodeString(isolate, args[1].As<String>(), frogjs::Encoding::kUtf8);
+    } else {
+        frogjs::GetBinaryData(args[1], &bytes);
+    }
+    FILE* stream = fd == 2 ? stderr : stdout;
+    bool repl = !frogjs::IsWorkerThread();
+    if (repl) frogjs::ReplBeforeOutput();
+    fwrite(bytes.data(), 1, bytes.size(), stream);
+    fflush(stream);
+    if (repl) frogjs::ReplAfterOutput();
+}
+
+static void IsATty(const FunctionCallbackInfo<Value>& args) {
+    int fd = args[0]->Int32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(-1);
+    args.GetReturnValue().Set(isatty(fd) == 1);
+}
+
+static void SetupProcessStdio(Isolate* isolate, Local<Context> context, Local<Value> stream) {
+    Local<Value> process_value = context->Global()->Get(context, String::NewFromUtf8Literal(isolate, "process")).ToLocalChecked();
+    if (!process_value->IsObject()) return;
+    Local<Object> native = Object::New(isolate);
+    frogjs::SetFunction(isolate, context, native, "writeStdio", WriteStdio);
+    frogjs::SetFunction(isolate, context, native, "isatty", IsATty);
+    Local<Value> argv[2] = {stream, native};
+    Local<Value> streams;
+    if (!frogjs::RunJsModule(isolate, context, "process_stdio", kProcessStdioSource, 2, argv).ToLocal(&streams)) return;
+    Local<Object> process = process_value.As<Object>();
+    Local<Array> pair = streams.As<Array>();
+    process->Set(context, String::NewFromUtf8Literal(isolate, "stdout"), pair->Get(context, 0).ToLocalChecked()).Check();
+    process->Set(context, String::NewFromUtf8Literal(isolate, "stderr"), pair->Get(context, 1).ToLocalChecked()).Check();
+}
+
 // Set up stream module (requires SetupBuffer and SetupEvents first): exposed
 // as global `stream` and returned by require('stream')
 void SetupStream(Isolate* isolate, Local<Context> context) {
@@ -1704,4 +1778,5 @@ void SetupStream(Isolate* isolate, Local<Context> context) {
         return;
     }
     global->Set(context, String::NewFromUtf8(isolate, "stream").ToLocalChecked(), stream).Check();
+    SetupProcessStdio(isolate, context, stream);
 }

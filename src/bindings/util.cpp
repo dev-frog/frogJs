@@ -577,7 +577,7 @@ function formatBuffer(ctx, value) {
   let str = info.hex.replace(/(.{2})/g, '$1 ').trim();
   const remaining = info.length - max;
   if (remaining > 0) str += ` ... ${remaining} more byte${remaining > 1 ? 's' : ''}`;
-  return `<Buffer${str ? ' ' + str : ''}>`;
+  return `<Buffer ${str}>`;
 }
 
 function formatArray(ctx, value, recurseTimes) {
@@ -960,18 +960,23 @@ function inherits(ctor, superCtor) {
   Object.setPrototypeOf(ctor.prototype, superCtor.prototype);
 }
 
+const kCustomPromisify = Symbol.for('nodejs.util.promisify.custom');
+
 function promisify(original) {
   if (typeof original !== 'function') {
     const err = new TypeError('The "original" argument must be of type function');
     err.code = 'ERR_INVALID_ARG_TYPE';
     throw err;
   }
+  // A function can say how it is promisified (child_process.exec does)
+  if (typeof original[kCustomPromisify] === 'function') return original[kCustomPromisify];
   return function (...args) {
     return new Promise((resolve, reject) => {
       original.call(this, ...args, (err, value) => (err ? reject(err) : resolve(value)));
     });
   };
 }
+promisify.custom = kCustomPromisify;
 
 return {
   inspect,
@@ -985,8 +990,8 @@ return {
 })
 )JS";
 
-static Persistent<Function> g_inspect;
-static Persistent<Function> g_format;
+static thread_local Persistent<Function> g_inspect;
+static thread_local Persistent<Function> g_format;
 
 // getProxyTarget(value): the target of a Proxy (null if revoked), else undefined
 static void GetProxyTarget(const FunctionCallbackInfo<Value>& args) {

@@ -1,15 +1,16 @@
 #include <v8.h>
 #include <uv.h>
+#include "frogjs/loop.h"
 #include <map>
 #include "frogjs/errors.h"
 
 using namespace v8;
 
 // Global timer ID counter
-static int g_next_timer_id = 1;
+static thread_local int g_next_timer_id = 1;
 
 // Map to keep track of active timers
-static std::map<int, uv_timer_t*> g_active_timers;
+static thread_local std::map<int, uv_timer_t*> g_active_timers;
 
 struct TimerData {
     Persistent<Function> callback;
@@ -74,7 +75,7 @@ void SetTimeout(const FunctionCallbackInfo<Value>& args) {
     // Create and start timer
     uv_timer_t* timer = new uv_timer_t;
     timer->data = data;
-    uv_timer_init(uv_default_loop(), timer);
+    uv_timer_init(frogjs::Loop(), timer);
     uv_timer_start(timer, TimerCallback, delay, 0);
 
     // Store in active timers map
@@ -108,7 +109,7 @@ void SetInterval(const FunctionCallbackInfo<Value>& args) {
     // Create and start repeating timer
     uv_timer_t* timer = new uv_timer_t;
     timer->data = data;
-    uv_timer_init(uv_default_loop(), timer);
+    uv_timer_init(frogjs::Loop(), timer);
     uv_timer_start(timer, TimerCallback, delay, delay);
 
     // Store in active timers map

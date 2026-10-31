@@ -1,5 +1,6 @@
 #include <v8.h>
 #include <uv.h>
+#include "frogjs/loop.h"
 #include <cstdlib>
 #include <cstring>
 #include <unistd.h>
@@ -7,11 +8,12 @@
 #include <string>
 #include <vector>
 #include "frogjs/version.h"
+#include "frogjs/worker.h"
 
 using namespace v8;
 
-static Isolate* g_isolate = nullptr;
-static Persistent<Object> g_process_object;
+static thread_local Isolate* g_isolate = nullptr;
+static thread_local Persistent<Object> g_process_object;
 
 // process.exit(code)
 void ProcessExit(const FunctionCallbackInfo<Value>& args) {
@@ -23,8 +25,14 @@ void ProcessExit(const FunctionCallbackInfo<Value>& args) {
         exit_code = args[0]->Int32Value(isolate->GetCurrentContext()).ToChecked();
     }
 
+    if (frogjs::IsWorkerThread()) {
+        frogjs::ExitWorker(isolate, exit_code);
+        return;
+    }
+
     // Stop the event loop and exit
-    uv_stop(uv_default_loop());
+    uv_stop(frogjs::Loop());
+    frogjs::TerminateAllWorkers();
     exit(exit_code);
 }
 

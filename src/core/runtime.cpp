@@ -13,9 +13,12 @@
 #include <libplatform/libplatform.h>
 #include <uv.h>
 #include "frogjs/errors.h"
+#include "frogjs/loop.h"
 #include "frogjs/repl.h"
+#include "frogjs/runtime.h"
 #include "frogjs/util.h"
 #include "frogjs/version.h"
+#include "frogjs/worker.h"
 
 using namespace v8;
 
@@ -34,6 +37,8 @@ void SetupPath(Isolate* isolate, Local<Context> context);
 void SetupOS(Isolate* isolate, Local<Context> context);
 void SetupUtil(Isolate* isolate, Local<Context> context);
 void SetupCrypto(Isolate* isolate, Local<Context> context);
+void SetupChildProcess(Isolate* isolate, Local<Context> context);
+void SetupWorkerThreads(Isolate* isolate, Local<Context> context);
 void SetupModules(Isolate* isolate, Local<Context> context, const std::string& mainFilePath);
 
 // Exit code for invalid command-line usage (same as Node.js)
@@ -164,21 +169,22 @@ static int ParseArgs(int argc, char* argv[], Options* opts) {
     return -1;
 }
 
-// Read a script file. Returns false and prints why if it can't be read.
-static bool ReadScriptFile(const std::string& filename, std::string* out) {
+namespace frogjs {
+
+bool ReadScriptFile(const std::string& filename, std::string* out, std::string* error) {
     struct stat info;
     if (stat(filename.c_str(), &info) != 0) {
-        fprintf(stderr, "frogjs: cannot open '%s': %s\n", filename.c_str(), strerror(errno));
+        *error = "cannot open '" + filename + "': " + strerror(errno);
         return false;
     }
     if (S_ISDIR(info.st_mode)) {
-        fprintf(stderr, "frogjs: cannot run '%s': is a directory\n", filename.c_str());
+        *error = "cannot run '" + filename + "': is a directory";
         return false;
     }
 
     std::ifstream file(filename);
     if (!file.is_open()) {
-        fprintf(stderr, "frogjs: cannot open '%s': %s\n", filename.c_str(), strerror(errno));
+        *error = "cannot open '" + filename + "': " + strerror(errno);
         return false;
     }
     std::stringstream buffer;
@@ -187,9 +193,8 @@ static bool ReadScriptFile(const std::string& filename, std::string* out) {
     return true;
 }
 
-// Compile and run the main script (a file, --eval code or stdin). Uncaught
-// errors are reported Node.js style; returns false if one occurred.
-static bool ExecuteScript(Isolate* isolate, Local<Context> context, const std::string& code,
+// The main script is a file, --eval code or stdin
+bool ExecuteScript(Isolate* isolate, Local<Context> context, const std::string& code,
                           const std::string& filename, bool print_result, bool check_only) {
     HandleScope handle_scope(isolate);
     TryCatch try_catch(isolate);
@@ -231,6 +236,23 @@ static bool ExecuteScript(Isolate* isolate, Local<Context> context, const std::s
     return true;
 }
 
+void RunEventLoop(Isolate* isolate) {
+    while (uv_run(Loop(), UV_RUN_DEFAULT)) {
+        // Process V8 microtasks (Promises)
+        isolate->PerformMicrotaskCheckpoint();
+    }
+}
+
+const std::string& ExecPath() {
+    return g_process_argv[0];
+}
+
+const std::vector<std::string>& ExecArgv() {
+    return g_exec_argv;
+}
+
+}  // namespace frogjs
+
 // Write console output: util.format(...args) plus a newline
 static void WriteConsole(const FunctionCallbackInfo<Value>& args, FILE* stream) {
     Isolate* isolate = args.GetIsolate();
@@ -240,10 +262,12 @@ static void WriteConsole(const FunctionCallbackInfo<Value>& args, FILE* stream) 
     if (!frogjs::Format(isolate, isolate->GetCurrentContext(), args, &text)) return;
     text += '\n';
 
-    frogjs::ReplBeforeOutput();
+    // The REPL's prompt belongs to the main thread
+    bool repl = !frogjs::IsWorkerThread();
+    if (repl) frogjs::ReplBeforeOutput();
     fwrite(text.data(), 1, text.size(), stream);
     fflush(stream);
-    frogjs::ReplAfterOutput();
+    if (repl) frogjs::ReplAfterOutput();
 }
 
 // console.log / console.info / console.debug implementation
@@ -283,15 +307,17 @@ void SetupConsole(Isolate* isolate, Local<Context> context) {
     ).Check();
 }
 
-// Create a context with all built-in bindings installed
-static Local<Context> CreateContext(Isolate* isolate) {
+namespace frogjs {
+
+Local<Context> CreateContext(Isolate* isolate, const std::vector<std::string>& argv,
+                             const std::vector<std::string>& exec_argv, const std::string& main_filename) {
     EscapableHandleScope handle_scope(isolate);
     Local<Context> context = Context::New(isolate);
     Context::Scope context_scope(context);
 
     SetupConsole(isolate, context);
     SetupUtil(isolate, context);
-    SetupProcess(isolate, context, g_process_argv, g_exec_argv);
+    SetupProcess(isolate, context, argv, exec_argv);
     SetupBuffer(isolate, context);
     SetupTimers(isolate, context);
     SetupFileSystem(isolate, context);
@@ -302,9 +328,18 @@ static Local<Context> CreateContext(Isolate* isolate) {
     SetupCrypto(isolate, context);
     SetupPath(isolate, context);
     SetupOS(isolate, context);
-    SetupModules(isolate, context, g_main_filename);
+    SetupChildProcess(isolate, context);
+    SetupWorkerThreads(isolate, context);
+    SetupModules(isolate, context, main_filename);
 
     return handle_scope.Escape(context);
+}
+
+}  // namespace frogjs
+
+// The main thread's context (also used by the REPL's .clear)
+static Local<Context> CreateMainContext(Isolate* isolate) {
+    return frogjs::CreateContext(isolate, g_process_argv, g_exec_argv, g_main_filename);
 }
 
 int main(int argc, char* argv[]) {
@@ -329,7 +364,11 @@ int main(int argc, char* argv[]) {
         code = opts.eval_code;
         g_main_filename = "[eval]";
     } else if (!opts.script.empty() && opts.script != "-") {
-        if (!ReadScriptFile(opts.script, &code)) return 1;
+        std::string error;
+        if (!frogjs::ReadScriptFile(opts.script, &code, &error)) {
+            fprintf(stderr, "frogjs: %s\n", error.c_str());
+            return 1;
+        }
         g_main_filename = opts.script;
         g_process_argv.push_back(opts.script);
     } else if (opts.script == "-" || !isatty(STDIN_FILENO)) {
@@ -373,22 +412,22 @@ int main(int argc, char* argv[]) {
         HandleScope handle_scope(isolate);
 
         // Create a new context with the built-in bindings
-        Local<Context> context = CreateContext(isolate);
+        Local<Context> context = CreateMainContext(isolate);
         Context::Scope context_scope(context);
 
         // Like Node.js, an uncaught error in the main script ends the process
         // without running the event loop
-        if (has_code && !ExecuteScript(isolate, context, code, g_main_filename, opts.print, opts.check)) {
+        if (has_code && !frogjs::ExecuteScript(isolate, context, code, g_main_filename, opts.print, opts.check)) {
             exit_code = 1;
         } else if (start_repl) {
-            exit_code = frogjs::StartREPL(isolate, context, CreateContext);
+            exit_code = frogjs::StartREPL(isolate, context, CreateMainContext);
         } else if (!opts.check) {
             // Run the event loop to handle async operations
-            while (uv_run(uv_default_loop(), UV_RUN_DEFAULT)) {
-                // Process V8 microtasks (Promises)
-                isolate->PerformMicrotaskCheckpoint();
-            }
+            frogjs::RunEventLoop(isolate);
         }
+
+        // Unref'd workers may still be running: stop them before V8 goes away
+        frogjs::TerminateAllWorkers();
     }
 
     // Dispose the isolate and tear down V8

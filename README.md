@@ -23,6 +23,8 @@
 - **REPL & CLI**: Interactive shell with history and tab completion, `--eval`/`--print`/`--check`, Node-style error reports
 - **Util**: `util.inspect` and `util.format` with the same output as Node.js (used by `console.log`)
 - **Crypto**: Node-compatible hashes and HMAC (md5, sha1, sha2), PBKDF2, secure random bytes/UUIDs, `timingSafeEqual`, with no OpenSSL dependency
+- **Child Processes**: `spawn`/`exec`/`execFile` with stdio streams, and `execSync`/`spawnSync`/`execFileSync`
+- **Worker Threads**: `Worker`s on their own threads, structured-clone message passing, `MessageChannel`, `SharedArrayBuffer` + `Atomics`
 - **Clean Architecture**: Minimal C++ codebase with clear separation of concerns
 
 ---
@@ -107,7 +109,7 @@ Run it:
 Run `frogjs` with no script to start an interactive shell:
 ```
 $ ./build/frogjs
-Welcome to FrogJS v0.7.0.
+Welcome to FrogJS v0.8.0.
 Type ".help" for more information.
 > const server = { port: 3000, routes: ['/', '/api'] }
 undefined
@@ -134,7 +136,7 @@ frogjs -p "os.cpus().length"      # evaluate and print the result
 frogjs -c script.js               # syntax check only
 frogjs -i -e "var x = 1"          # run code, then start the REPL
 echo "console.log('hi')" | frogjs # read the script from stdin
-frogjs --version                  # v0.7.0
+frogjs --version                  # v0.8.0
 frogjs --help                     # all options
 ```
 
@@ -217,6 +219,39 @@ crypto.randomInt(1, 7); // a dice roll
 crypto.timingSafeEqual(Buffer.from(tokenA), Buffer.from(tokenB));
 ```
 
+### Child Processes
+```javascript
+const { spawn, exec, execSync } = require('child_process');
+
+const ls = spawn('ls', ['-l', '/tmp']);
+ls.stdout.pipe(process.stdout);
+ls.on('close', (code) => console.log(`ls exited with ${code}`));
+
+exec('git rev-parse HEAD', (err, stdout) => console.log(stdout.trim()));
+const version = execSync('uname -r', { encoding: 'utf8' });
+
+// Write to a child's stdin
+const sort = spawn('sort');
+sort.stdout.on('data', (data) => console.log(data.toString()));
+sort.stdin.end('pear\napple\nfig\n');
+```
+
+### Worker Threads
+```javascript
+const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
+
+if (isMainThread) {
+    const shared = new Int32Array(new SharedArrayBuffer(4));
+    const worker = new Worker(__filename, { workerData: { shared: shared.buffer } });
+    worker.on('message', (msg) => console.log('worker says', msg, 'counter', shared[0]));
+    worker.on('exit', (code) => console.log('worker exited', code));
+} else {
+    const counter = new Int32Array(workerData.shared);
+    Atomics.add(counter, 0, 42);
+    parentPort.postMessage('done');
+}
+```
+
 ### TCP Server
 Create a simple TCP server:
 ```javascript
@@ -284,6 +319,8 @@ Check out the `examples/` directory for more samples:
 - `examples/test-os.js` - OS module usage
 - `examples/test-util.js` - Util module self-test (`inspect`, `format`)
 - `examples/test-crypto.js` - Crypto module and Buffer encodings self-test
+- `examples/test-child-process.js` - Child process module self-test
+- `examples/test-worker-threads.js` - Worker threads self-test
 - `examples/test-cli.sh` - CLI and REPL self-test
 
 Run examples:
@@ -318,6 +355,8 @@ frogjs/
 │       ├── os.cpp           # OS information
 │       ├── util.cpp         # util.inspect / util.format (embedded JS)
 │       ├── crypto.cpp       # crypto module (embedded JS on native helpers)
+│       ├── child_process.cpp # spawn/exec/execSync (uv_spawn, pipes as streams)
+│       ├── worker_threads.cpp # Workers (isolate + loop per thread), MessagePort
 │       └── modules.cpp      # Module system
 │   └── utils/
 │       ├── js_module.cpp    # Loader for modules written in embedded JS
@@ -353,6 +392,9 @@ frogjs/
 - CLI options (--eval, --print, --check, --interactive, --version, --help)
 - Util module (inspect, format, promisify, inherits, isDeepStrictEqual)
 - Crypto module (createHash, createHmac, pbkdf2, randomBytes, randomUUID, randomInt, getRandomValues, timingSafeEqual)
+- Child process module (spawn, exec, execFile, spawnSync, execSync, execFileSync)
+- Worker threads (Worker, parentPort, workerData, MessageChannel, SharedArrayBuffer)
+- process.stdout / process.stderr streams
 - Process object (argv, execArgv, env, exit, cwd, pid, platform, version, versions)
 - Buffer class for binary data
 - Additional FS operations (mkdir, rmdir, stat, readdir, unlink, existsSync)
@@ -456,7 +498,7 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Version**: 0.7.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
+**Version**: 0.8.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
 **Status**: Active Development
 **Last Updated**: 2026-10-16
 
