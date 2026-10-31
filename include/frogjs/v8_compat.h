@@ -40,4 +40,16 @@ inline void WriteOneByte(v8::Isolate* isolate, v8::Local<S> str, uint8_t* buffer
     }
 }
 
+// Copy a string's UTF-16 code units into buffer, which must hold str->Length()
+// units. Same rename as WriteOneByte (WriteV2 in 13.x, Write in 15.x).
+template <typename S = v8::String>
+inline void WriteTwoByte(v8::Isolate* isolate, v8::Local<S> str, uint16_t* buffer) {
+    uint32_t length = static_cast<uint32_t>(str->Length());
+    if constexpr (requires { str->Write(isolate, uint32_t{0}, length, buffer, 0); }) {
+        str->Write(isolate, 0, length, buffer, 0);
+    } else {
+        str->WriteV2(isolate, 0, length, buffer, 0);
+    }
+}
+
 }  // namespace frogjs

@@ -16,6 +16,10 @@ BufferData* GetBufferData(v8::Local<v8::Object> buffer_obj);
 // True if value was created by the Buffer constructor (safe to pass to GetBufferData)
 bool IsBuffer(v8::Local<v8::Value> value);
 
+// A new Buffer holding a copy of data
+v8::Local<v8::Object> NewBuffer(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                                const char* data, size_t length);
+
 // Byte strings hold one char per byte (codes 0-255). These back the JS modules
 // (http, stream) that work on raw bytes:
 // toByteString(string | Buffer): UTF-8 encode a string, or copy a Buffer's bytes

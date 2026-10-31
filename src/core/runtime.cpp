@@ -33,6 +33,7 @@ void SetupHTTP(Isolate* isolate, Local<Context> context);
 void SetupPath(Isolate* isolate, Local<Context> context);
 void SetupOS(Isolate* isolate, Local<Context> context);
 void SetupUtil(Isolate* isolate, Local<Context> context);
+void SetupCrypto(Isolate* isolate, Local<Context> context);
 void SetupModules(Isolate* isolate, Local<Context> context, const std::string& mainFilePath);
 
 // Exit code for invalid command-line usage (same as Node.js)
@@ -298,6 +299,7 @@ static Local<Context> CreateContext(Isolate* isolate) {
     SetupEvents(isolate, context);
     SetupStream(isolate, context);
     SetupHTTP(isolate, context);
+    SetupCrypto(isolate, context);
     SetupPath(isolate, context);
     SetupOS(isolate, context);
     SetupModules(isolate, context, g_main_filename);

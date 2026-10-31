@@ -8,6 +8,8 @@ Complete API documentation for FrogJS runtime and built-in modules.
 - [Global Objects](#global-objects)
 - [Console API](#console-api)
 - [Util API](#util-api)
+- [Buffer Encodings](#buffer-encodings)
+- [Crypto API](#crypto-api)
 - [Timer API](#timer-api)
 - [File System API](#file-system-api)
 - [Network API](#network-api)
@@ -32,7 +34,7 @@ frogjs                                     # start the REPL
 | `-p`, `--print <script>` | Evaluate `script` and print the result like `console.log` would |
 | `-c`, `--check` | Compile the script (or stdin) without running it; exit code 1 on a syntax error |
 | `-i`, `--interactive` | Start the REPL even if stdin is not a terminal, after running the script or `--eval` code |
-| `-v`, `--version` | Print the version (`v0.6.0`) |
+| `-v`, `--version` | Print the version (`v0.7.0`) |
 | `-h`, `--help` | Print usage |
 | `-` | Read the script from stdin (the default when no script is given and stdin is not a terminal) |
 | `--` | End of options: the next argument is the script |
@@ -952,6 +954,125 @@ Promise versions of `pipeline()` and `finished()`.
 
 ---
 
+## Buffer Encodings
+
+`Buffer.from(string, encoding)`, `buf.toString([encoding[, start[, end]]])` and `Buffer.byteLength(string, encoding)` accept:
+
+| Encoding | Description |
+|----------|-------------|
+| `utf8` (default), `utf-8` | UTF-8 text |
+| `hex` | Two hex digits per byte. Decoding stops at the first invalid pair |
+| `base64` | Standard Base64 with padding. Decoding also accepts the URL alphabet and skips whitespace |
+| `base64url` | URL-safe Base64 without padding |
+| `latin1`, `binary` | One byte per character (code points 0-255) |
+| `ascii` | Like `latin1`; `toString` clears the high bit |
+
+Names are case-insensitive; an unknown name throws `TypeError [ERR_UNKNOWN_ENCODING]`.
+
+```javascript
+Buffer.from('hello').toString('hex');            // '68656c6c6f'
+Buffer.from('68656c6c6f', 'hex').toString();     // 'hello'
+Buffer.from('hello').toString('base64');         // 'aGVsbG8='
+Buffer.from('hello').toString('utf8', 1, 3);     // 'el'
+```
+
+`Buffer.from(buffer | typedArray | arrayBuffer)` copies the bytes.
+
+---
+
+## Crypto API
+
+`require('crypto')` (also the global `crypto`). Supported hashes: `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`. Algorithm names are case-insensitive and also accept the `SHA-256` and `RSA-SHA256` forms.
+
+### `crypto.createHash(algorithm)`
+Returns a `Hash`. Throws `Error: Digest method not supported` for other algorithms.
+
+#### `hash.update(data[, inputEncoding])`
+Adds `data` (a string, Buffer, TypedArray or DataView). `inputEncoding` applies to strings (default `utf8`). Returns the hash, so calls chain.
+
+#### `hash.digest([encoding])`
+Returns the digest as a Buffer, or as a string in `encoding` (`hex`, `base64`, `base64url`, `latin1`). After `digest()`, `update()`, `digest()` and `copy()` throw `Error [ERR_CRYPTO_HASH_FINALIZED]: Digest already called`.
+
+#### `hash.copy()`
+Returns a new `Hash` with the current state, e.g. to get intermediate digests.
+
+```javascript
+const crypto = require('crypto');
+crypto.createHash('sha256').update('hello').digest('hex');
+// '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
+
+const hash = crypto.createHash('md5');
+hash.update('part 1, ');
+hash.update('part 2');
+hash.digest('base64');
+```
+
+`Hash` is a Transform stream: write data to it and read the digest Buffer after `end()`, or pipe into it.
+
+```javascript
+const hash = crypto.createHash('sha1');
+hash.on('data', (digest) => console.log(digest.toString('hex')));
+request.pipe(hash);
+```
+
+### `crypto.createHmac(algorithm, key)`
+Returns an `Hmac` (RFC 2104) keyed with `key` (a string, Buffer, TypedArray, DataView or ArrayBuffer). It has the same `update()` and `digest()` methods as `Hash` and is also a Transform stream. A second `digest()` call returns an empty result, as in Node.js. An unsupported algorithm throws `TypeError [ERR_CRYPTO_INVALID_DIGEST]`.
+
+```javascript
+const signature = crypto.createHmac('sha256', process.env.WEBHOOK_SECRET)
+    .update(body)
+    .digest('hex');
+```
+
+### `crypto.pbkdf2(password, salt, iterations, keylen, digest, callback)`
+Derives a `keylen`-byte key with PBKDF2 (RFC 8018) and HMAC-`digest`, on the libuv thread pool. `callback(err, derivedKey)` receives a Buffer.
+
+- `password`, `salt`: strings, Buffers, TypedArrays, DataViews or ArrayBuffers
+- `iterations`: integer from 1 to 2147483647 (use 100,000 or more for passwords)
+- `keylen`: integer from 0 to 2147483647
+- `digest`: a supported hash name (required)
+
+```javascript
+const salt = crypto.randomBytes(16);
+crypto.pbkdf2(password, salt, 210000, 64, 'sha512', (err, key) => {
+    if (err) throw err;
+    store(salt.toString('hex'), key.toString('hex'));
+});
+```
+
+### `crypto.pbkdf2Sync(password, salt, iterations, keylen, digest)`
+Synchronous version; returns the Buffer.
+
+### `crypto.randomBytes(size[, callback])`
+Returns `size` cryptographically strong random bytes from the operating system (via `uv_random`). With a callback, the bytes are generated on the thread pool and passed as `callback(err, buf)`. `size` must be a number from 0 to 2147483647.
+
+```javascript
+const token = crypto.randomBytes(32).toString('base64url');
+```
+
+### `crypto.randomInt([min, ]max[, callback])`
+Returns a random integer `n` with `min <= n < max` (`min` defaults to 0), without modulo bias. Both must be safe integers and `max - min` at most 2^48.
+
+### `crypto.randomUUID()`
+Returns a random RFC 4122 version 4 UUID string, e.g. `'1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed'`.
+
+### `crypto.getRandomValues(typedArray)`
+Fills an integer TypedArray (`Uint8Array`, `Int32Array`, `BigUint64Array`, ...) with random values in place and returns it. At most 65,536 bytes per call.
+
+### `crypto.timingSafeEqual(a, b)`
+Compares two Buffers, TypedArrays, DataViews or ArrayBuffers in constant time, so the time taken doesn't reveal where they differ. Use it to check tokens and signatures. Throws `RangeError [ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH]` if the lengths differ.
+
+```javascript
+const expected = Buffer.from(computeSignature(body));
+const received = Buffer.from(request.headers['x-signature'] || '');
+const valid = expected.length === received.length && crypto.timingSafeEqual(expected, received);
+```
+
+### `crypto.getHashes()`
+Returns the supported hash names.
+
+---
+
 ## Module System
 
 ### `require(id)`
@@ -963,7 +1084,7 @@ Load modules.
 **Returns:** Module exports
 
 **Module Resolution:**
-1. Built-in modules: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`
+1. Built-in modules: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`
 2. Relative paths (`./`, `../`)
 3. Absolute paths
 4. Auto-append `.js` extension

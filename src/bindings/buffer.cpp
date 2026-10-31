@@ -1,6 +1,7 @@
 #include <v8.h>
 #include "frogjs/v8_compat.h"
 #include "frogjs/buffer.h"
+#include "frogjs/encoding.h"
 #include <cstring>
 #include <algorithm>
 #include <vector>
@@ -128,12 +129,20 @@ void BufferFrom(const FunctionCallbackInfo<Value>& args) {
     size_t length = 0;
     char* data = nullptr;
 
+    std::string bytes;
     if (args[0]->IsString()) {
-        // Buffer.from(string)
-        String::Utf8Value str(isolate, args[0]);
-        length = str.length();
+        // Buffer.from(string[, encoding])
+        frogjs::Encoding encoding;
+        if (!frogjs::GetEncodingArg(isolate, args[1], frogjs::Encoding::kUtf8, &encoding)) return;
+        bytes = frogjs::DecodeString(isolate, args[0].As<String>(), encoding);
+        length = bytes.size();
         data = new char[length];
-        memcpy(data, *str, length);
+        memcpy(data, bytes.data(), length);
+    } else if (frogjs::GetBinaryData(args[0], &bytes)) {
+        // Buffer.from(buffer | typedArray | arrayBuffer) - copies the bytes
+        length = bytes.size();
+        data = new char[length];
+        memcpy(data, bytes.data(), length);
     } else if (args[0]->IsArray()) {
         // Buffer.from(array)
         Local<Array> array = Local<Array>::Cast(args[0]);
@@ -149,8 +158,8 @@ void BufferFrom(const FunctionCallbackInfo<Value>& args) {
             }
         }
     } else {
-        isolate->ThrowException(String::NewFromUtf8(isolate,
-            "Buffer.from requires string or array").ToLocalChecked());
+        isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate,
+            "Buffer.from requires a string, array, Buffer, TypedArray or ArrayBuffer").ToLocalChecked()));
         return;
     }
 
@@ -180,25 +189,41 @@ void BufferFrom(const FunctionCallbackInfo<Value>& args) {
     args.GetReturnValue().Set(buffer_obj);
 }
 
-// Buffer.byteLength(string) - static method
+// Buffer.byteLength(string[, encoding] | buffer) - static method
 void BufferByteLength(const FunctionCallbackInfo<Value>& args) {
     Isolate* isolate = args.GetIsolate();
     HandleScope handle_scope(isolate);
 
+    std::string bytes;
+    if (args.Length() >= 1 && frogjs::GetBinaryData(args[0], &bytes)) {
+        args.GetReturnValue().Set(static_cast<double>(bytes.size()));
+        return;
+    }
     if (args.Length() < 1 || !args[0]->IsString()) {
         isolate->ThrowException(String::NewFromUtf8(isolate,
             "Buffer.byteLength requires a string").ToLocalChecked());
         return;
     }
 
-    String::Utf8Value str(isolate, args[0]);
-    args.GetReturnValue().Set(static_cast<int>(str.length()));
+    frogjs::Encoding encoding;
+    if (!frogjs::GetEncodingArg(isolate, args[1], frogjs::Encoding::kUtf8, &encoding)) return;
+    if (encoding == frogjs::Encoding::kUtf8) {
+        String::Utf8Value str(isolate, args[0]);
+        args.GetReturnValue().Set(static_cast<int>(str.length()));
+        return;
+    }
+    args.GetReturnValue().Set(static_cast<double>(
+        frogjs::DecodeString(isolate, args[0].As<String>(), encoding).size()));
 }
 
-// buf.toString(encoding)
+// buf.toString([encoding[, start[, end]]])
 void BufferToString(const FunctionCallbackInfo<Value>& args) {
     Isolate* isolate = args.GetIsolate();
     HandleScope handle_scope(isolate);
+    Local<Context> context = isolate->GetCurrentContext();
+
+    frogjs::Encoding encoding;
+    if (!frogjs::GetEncodingArg(isolate, args[0], frogjs::Encoding::kUtf8, &encoding)) return;
 
     Local<Object> buffer_obj = args.This();
     BufferData* buffer_data = GetBufferData(buffer_obj);
@@ -208,9 +233,24 @@ void BufferToString(const FunctionCallbackInfo<Value>& args) {
         return;
     }
 
-    // For now, only support utf8 encoding (default)
-    args.GetReturnValue().Set(String::NewFromUtf8(isolate,
-        buffer_data->data, NewStringType::kNormal, buffer_data->length).ToLocalChecked());
+    // start/end are clamped to the buffer, like Node.js
+    size_t length = buffer_data->length;
+    size_t start = 0;
+    size_t end = length;
+    if (args.Length() >= 2 && args[1]->IsNumber()) {
+        int64_t value = args[1]->IntegerValue(context).FromMaybe(0);
+        start = value < 0 ? 0 : std::min(static_cast<size_t>(value), length);
+    }
+    if (args.Length() >= 3 && args[2]->IsNumber()) {
+        int64_t value = args[2]->IntegerValue(context).FromMaybe(0);
+        end = value < 0 ? 0 : std::min(static_cast<size_t>(value), length);
+    }
+    if (end <= start) {
+        args.GetReturnValue().Set(String::Empty(isolate));
+        return;
+    }
+
+    args.GetReturnValue().Set(frogjs::EncodeBytes(isolate, buffer_data->data + start, end - start, encoding));
 }
 
 // buf.write(string, offset)
@@ -348,6 +388,12 @@ static Local<Object> NewBufferFromData(Isolate* isolate, Local<Context> context,
     buffer_obj->Set(context, String::NewFromUtf8(isolate, "length").ToLocalChecked(),
         Integer::New(isolate, length)).Check();
     return buffer_obj;
+}
+
+Local<Object> NewBuffer(Isolate* isolate, Local<Context> context, const char* data, size_t length) {
+    char* copy = length > 0 ? new char[length] : nullptr;
+    if (length > 0) memcpy(copy, data, length);
+    return NewBufferFromData(isolate, context, copy, length);
 }
 
 // Buffer.isBuffer(value)

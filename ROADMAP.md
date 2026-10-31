@@ -1,6 +1,6 @@
 # FrogJS Development Roadmap
 
-## 📊 Current Status: Version 0.6.0
+## 📊 Current Status: Version 0.7.0
 
 ### ✅ Completed (v0.1.0)
 - Core V8 runtime integration
@@ -45,6 +45,12 @@
 - Util module: `util.inspect` (Node-identical output), `util.format`, `promisify`, `inherits`, `isDeepStrictEqual`
 - `console.log` formats objects with `util.inspect`; `console.info`/`debug`/`warn`
 - `process.versions`, `process.execArgv`
+
+### ✅ Completed (v0.7.0)
+- Crypto module: `createHash` and `createHmac` (md5, sha1, sha224, sha256, sha384, sha512), `pbkdf2`/`pbkdf2Sync`
+- `randomBytes`, `randomInt`, `randomUUID`, `getRandomValues`, `timingSafeEqual`, `getHashes`
+- Hash and Hmac objects are Transform streams (`source.pipe(hash)`)
+- Buffer encodings: `hex`, `base64`, `base64url`, `latin1`/`binary`, `ascii` in `Buffer.from`, `buf.toString([encoding[, start[, end]]])` and `Buffer.byteLength`; `Buffer.from(buffer | TypedArray | ArrayBuffer)`
 
 ---
 
@@ -280,7 +286,7 @@ void StartREPL(Isolate* isolate);
 
 ---
 
-### Version 0.7.0 - Crypto & Security
+### Version 0.7.0 - Crypto & Security ✅ Completed
 
 **Priority: LOW-MEDIUM**
 **Estimated Effort: 2 weeks**
@@ -300,6 +306,14 @@ void SetupCrypto(Isolate* isolate, Local<Context> context);
 #### Utilities
 - `crypto.randomBytes(size)` - Random bytes
 - `crypto.pbkdf2()` - Password-based key derivation
+
+**Implementation Notes:**
+- MD5, SHA-1, SHA-2, HMAC and PBKDF2 are implemented in `src/utils/hash.cpp` instead of linking OpenSSL, so there is still no dependency beyond V8 and libuv. The SHA-2/MD5 constants were derived from their definitions (roots of primes, `sin`), and outputs match Node.js/OpenSSL for every algorithm at all padding-boundary lengths, byte-at-a-time updates and 1 MB inputs
+- The API layer is JavaScript embedded in `src/bindings/crypto.cpp`; argument checks, error codes and messages match Node.js (`ERR_CRYPTO_HASH_FINALIZED`, `ERR_CRYPTO_INVALID_DIGEST`, `ERR_OUT_OF_RANGE`, ...), and `examples/test-crypto.js` passes under both runtimes
+- Random bytes come from the OS CSPRNG through `uv_random()`; async `randomBytes` and `pbkdf2` run on the libuv thread pool
+- `hash.o` is built with `-O2` (the rest of the build is unoptimized). PBKDF2-SHA256 with 100k iterations takes ~60 ms, against ~15 ms in Node.js, which uses OpenSSL's assembly and the CPU's SHA instructions
+- Differences from Node.js: `pbkdf2Sync(..., keylen 0)` returns an empty Buffer (Node.js 24 throws "Deriving bits failed"); `getHashes()` lists only the six supported hashes
+- Not included: ciphers (`createCipheriv`), signatures and key objects, `scrypt`, `hkdf`, `randomFill`/`randomFillSync`, Web Crypto `subtle`
 
 ---
 
@@ -415,8 +429,8 @@ declare module 'http' { ... }
 - **v0.4.0**: ✅ Done
 - **v0.5.0**: ✅ Done
 - **v0.6.0**: ✅ Done
-- **v0.7.0**: 2 weeks (recommended immediate focus)
-- **v0.8.0**: 4-6 weeks
+- **v0.7.0**: ✅ Done
+- **v0.8.0**: 4-6 weeks (recommended immediate focus)
 - **v0.9.0**: 2-3 weeks
 - **v1.0.0**: 4-6 weeks
 
@@ -426,15 +440,17 @@ declare module 'http' { ... }
 
 ## 🚀 Quick Start Recommendation
 
-Next up is **v0.7.0** (Crypto). Smaller follow-ups that build on earlier versions:
+Next up is **v0.8.0** (Child Process & Worker Threads). Smaller follow-ups that build on earlier versions:
 - `fs.createReadStream` / `fs.createWriteStream` on top of `stream.Readable`/`Writable`
 - Make `net` sockets `Duplex` streams so `socket.write()` reports backpressure (HTTP responses would inherit it)
 - Top-level `await` in the REPL; report unhandled promise rejections
 - `fs` callbacks receive error strings, not `Error` objects, and `fs.readFile` has no encoding argument
+- Free Buffer memory when a Buffer is garbage collected (`BufferFinalizer` is still a no-op, so long-running code that allocates Buffers, e.g. with `randomBytes`, grows)
+- Ciphers (`createCipheriv`/`createDecipheriv`, AES-GCM) and `scrypt`
 
 ```bash
 # Create implementation branch
-git checkout -b feature/crypto
+git checkout -b feature/child-process
 
 # Focus on one feature at a time
 # Test thoroughly with examples

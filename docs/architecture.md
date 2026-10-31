@@ -94,6 +94,9 @@ void SetupConsole(Isolate* isolate, Local<Context> context)
 ```
 Arguments are formatted by `util.format` (`frogjs::Format`).
 
+#### Crypto (`src/bindings/crypto.cpp`, `src/utils/hash.cpp`)
+The algorithms (MD5, SHA-1, SHA-224/256/384/512, HMAC, PBKDF2) are plain C++ in `hash.cpp`, behind the `frogjs::Digest` interface (`include/frogjs/hash.h`). The Node-style API (`Hash`/`Hmac` Transform streams, argument validation) is embedded JavaScript in `crypto.cpp`, which holds each digest in a handle object whose weak callback frees it. Async `pbkdf2` runs on the libuv thread pool (`uv_queue_work`) and random bytes come from `uv_random()`. Byte encodings shared with `Buffer` live in `src/utils/encoding.cpp`.
+
 #### Util (`src/bindings/util.cpp`)
 `util.inspect` and `util.format` are written in JavaScript embedded in the C++ file (like `events`, `stream` and `http`). A few native helpers are passed in for what JavaScript can't see: a `Proxy`'s target, a `Promise`'s state, boxed primitives and `Buffer` bytes. C++ code calls them through `include/frogjs/util.h`:
 ```cpp

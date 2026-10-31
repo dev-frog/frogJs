@@ -138,8 +138,9 @@ Node.js-style streams (`require('stream')`, also the global `stream`)
 - **Differences from Node.js**: strings reach `_write()` as strings and their `highWaterMark` length is counted in characters; `setEncoding()` supports `utf8`, `latin1`/`binary`, `ascii` and `hex`
 
 ### 12. Buffer
-- `Buffer.alloc(size)`, `Buffer.from(string | array)`, `Buffer.byteLength(string)`, `Buffer.concat(list[, totalLength])`, `Buffer.isBuffer(value)`
-- `buf.toString()`, `buf.write(string[, offset])`, `buf.slice([start][, end])`, `buf.length`
+- `Buffer.alloc(size)`, `Buffer.from(string[, encoding] | array | buffer | TypedArray | ArrayBuffer)`, `Buffer.byteLength(string[, encoding])`, `Buffer.concat(list[, totalLength])`, `Buffer.isBuffer(value)`
+- `buf.toString([encoding[, start[, end]]])`, `buf.write(string[, offset])`, `buf.slice([start][, end])`, `buf.length`
+- Encodings: `utf8`, `hex`, `base64`, `base64url`, `latin1`/`binary`, `ascii` (unknown names throw `ERR_UNKNOWN_ENCODING`)
 
 ### 13. Util API
 `require('util')`, also the global `util`
@@ -149,7 +150,20 @@ Node.js-style streams (`require('stream')`, also the global `stream`)
 - `util.format(format, ...args)`, `util.formatWithOptions(options, format, ...args)`
 - `util.promisify(fn)`, `util.inherits(ctor, superCtor)`, `util.isDeepStrictEqual(a, b)`, `util.stripVTControlCharacters(str)`
 
-### 14. REPL & Command Line
+### 14. Crypto API
+`require('crypto')`, also the global `crypto`. Implemented without OpenSSL; outputs match Node.js.
+- `crypto.createHash(algorithm)` - md5, sha1, sha224, sha256, sha384, sha512 (names are case-insensitive; `SHA-256` and `RSA-SHA256` work too)
+  - `hash.update(data[, inputEncoding])`, `hash.digest([encoding])`, `hash.copy()`
+- `crypto.createHmac(algorithm, key)` - `hmac.update()`, `hmac.digest([encoding])`
+- Hash and Hmac are Transform streams: `write()`/`end()` then `read()` the digest, or `source.pipe(hash)`
+- `crypto.pbkdf2(password, salt, iterations, keylen, digest, callback)` (thread pool) and `crypto.pbkdf2Sync()`
+- `crypto.randomBytes(size[, callback])`, `crypto.randomInt([min, ]max[, callback])`, `crypto.randomUUID()`, `crypto.getRandomValues(typedArray)` - from the OS CSPRNG
+- `crypto.timingSafeEqual(a, b)` - constant-time comparison
+- `crypto.getHashes()`
+- Errors use Node.js codes and messages (`ERR_CRYPTO_HASH_FINALIZED`, `ERR_CRYPTO_INVALID_DIGEST`, `ERR_INVALID_ARG_TYPE`, `ERR_OUT_OF_RANGE`, ...)
+- **Not included**: ciphers, signatures, key objects, `scrypt`, Web Crypto `subtle`
+
+### 15. REPL & Command Line
 - `frogjs` with no script (and a terminal) starts the REPL
   - Line editing (arrows, Home/End, Ctrl+A/E/B/F/K/U/W/L, Alt+B/F), history in `~/.frogjs_repl_history` (`FROGJS_REPL_HISTORY`), tab completion
   - Multi-line input, `{ ... }` evaluated as an object literal, colored results (disable with `NO_COLOR`)
@@ -356,6 +370,7 @@ console.log('Home:', os.homedir());
 - Events module (EventEmitter)
 - Streams (Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished)
 - Util module (inspect, format)
+- Crypto module (hashes, HMAC, PBKDF2, random values)
 - REPL and command-line options
 
 ### In Progress 🔨
@@ -363,7 +378,7 @@ console.log('Home:', os.homedir());
 
 ### Planned Features ⏳
 - `fs.createReadStream` / `fs.createWriteStream`
-- Crypto module
+- Child processes
 - Worker threads
 - Native ESM support (import/export)
 - TypeScript definitions
@@ -400,6 +415,7 @@ Run example scripts to test features:
 
 # Util, CLI & REPL
 ./build/frogjs examples/test-util.js
+./build/frogjs examples/test-crypto.js
 ./examples/test-cli.sh
 ```
 
@@ -434,4 +450,4 @@ FrogJS aims for CommonJS compatibility but is not fully Node.js compatible. Focu
 ---
 
 **Last Updated**: 2026-10-31
-**Version**: 0.6.0 (Development)
+**Version**: 0.7.0 (Development)

@@ -22,6 +22,7 @@
 - **Path & OS Utilities**: Node-compatible `path` and `os` modules
 - **REPL & CLI**: Interactive shell with history and tab completion, `--eval`/`--print`/`--check`, Node-style error reports
 - **Util**: `util.inspect` and `util.format` with the same output as Node.js (used by `console.log`)
+- **Crypto**: Node-compatible hashes and HMAC (md5, sha1, sha2), PBKDF2, secure random bytes/UUIDs, `timingSafeEqual`, with no OpenSSL dependency
 - **Clean Architecture**: Minimal C++ codebase with clear separation of concerns
 
 ---
@@ -106,7 +107,7 @@ Run it:
 Run `frogjs` with no script to start an interactive shell:
 ```
 $ ./build/frogjs
-Welcome to FrogJS v0.6.0.
+Welcome to FrogJS v0.7.0.
 Type ".help" for more information.
 > const server = { port: 3000, routes: ['/', '/api'] }
 undefined
@@ -133,7 +134,7 @@ frogjs -p "os.cpus().length"      # evaluate and print the result
 frogjs -c script.js               # syntax check only
 frogjs -i -e "var x = 1"          # run code, then start the REPL
 echo "console.log('hi')" | frogjs # read the script from stdin
-frogjs --version                  # v0.6.0
+frogjs --version                  # v0.7.0
 frogjs --help                     # all options
 ```
 
@@ -195,6 +196,25 @@ http.createServer((req, res) => {
         if (!err) bus.emit('upload', size);
     });
 }).listen(3000);
+```
+
+### Crypto
+```javascript
+const crypto = require('crypto');
+
+crypto.createHash('sha256').update('hello').digest('hex');
+// '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
+crypto.createHmac('sha256', 'secret').update('message').digest('base64');
+
+// Password hashing on the thread pool
+const salt = crypto.randomBytes(16);
+crypto.pbkdf2('my password', salt, 100000, 32, 'sha256', (err, key) => {
+    console.log(key.toString('hex'));
+});
+
+crypto.randomUUID();   // e.g. '3b241101-e2bb-4255-8caf-4136c566a962'
+crypto.randomInt(1, 7); // a dice roll
+crypto.timingSafeEqual(Buffer.from(tokenA), Buffer.from(tokenB));
 ```
 
 ### TCP Server
@@ -263,6 +283,7 @@ Check out the `examples/` directory for more samples:
 - `examples/test-path.js` - Path module usage
 - `examples/test-os.js` - OS module usage
 - `examples/test-util.js` - Util module self-test (`inspect`, `format`)
+- `examples/test-crypto.js` - Crypto module and Buffer encodings self-test
 - `examples/test-cli.sh` - CLI and REPL self-test
 
 Run examples:
@@ -296,10 +317,13 @@ frogjs/
 │       ├── path.cpp         # Path utilities
 │       ├── os.cpp           # OS information
 │       ├── util.cpp         # util.inspect / util.format (embedded JS)
+│       ├── crypto.cpp       # crypto module (embedded JS on native helpers)
 │       └── modules.cpp      # Module system
 │   └── utils/
 │       ├── js_module.cpp    # Loader for modules written in embedded JS
-│       └── errors.cpp       # Node-style uncaught error reports
+│       ├── errors.cpp       # Node-style uncaught error reports
+│       ├── encoding.cpp     # hex/base64/latin1/... for Buffer and crypto
+│       └── hash.cpp         # MD5, SHA-1, SHA-2, HMAC, PBKDF2
 ├── examples/                # Example scripts
 ├── docs/                    # Documentation
 ├── include/frogjs/          # Shared headers (V8 compat, Buffer, JS module loader)
@@ -328,6 +352,7 @@ frogjs/
 - REPL (history, tab completion, multi-line input, commands)
 - CLI options (--eval, --print, --check, --interactive, --version, --help)
 - Util module (inspect, format, promisify, inherits, isDeepStrictEqual)
+- Crypto module (createHash, createHmac, pbkdf2, randomBytes, randomUUID, randomInt, getRandomValues, timingSafeEqual)
 - Process object (argv, execArgv, env, exit, cwd, pid, platform, version, versions)
 - Buffer class for binary data
 - Additional FS operations (mkdir, rmdir, stat, readdir, unlink, existsSync)
@@ -337,7 +362,7 @@ frogjs/
 
 ### Planned
 - File streams (fs.createReadStream / fs.createWriteStream)
-- Crypto module
+- Child processes
 - Worker threads
 - Windows support
 
@@ -431,7 +456,7 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Version**: 0.6.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
+**Version**: 0.7.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
 **Status**: Active Development
 **Last Updated**: 2026-10-16
 
