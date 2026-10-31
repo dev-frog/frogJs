@@ -3,8 +3,11 @@
 Complete API documentation for FrogJS runtime and built-in modules.
 
 ## Table of Contents
+- [Command Line](#command-line)
+- [REPL](#repl)
 - [Global Objects](#global-objects)
 - [Console API](#console-api)
+- [Util API](#util-api)
 - [Timer API](#timer-api)
 - [File System API](#file-system-api)
 - [Network API](#network-api)
@@ -12,6 +15,99 @@ Complete API documentation for FrogJS runtime and built-in modules.
 - [Events API](#events-api)
 - [Stream API](#stream-api)
 - [Module System](#module-system)
+
+---
+
+## Command Line
+
+```
+frogjs [options] [ script.js ] [arguments]
+frogjs [options] -e "script" [arguments]
+frogjs                                     # start the REPL
+```
+
+| Option | Description |
+|--------|-------------|
+| `-e`, `--eval <script>` | Evaluate `script`. `__filename` is `[eval]`; arguments after it go to `process.argv` |
+| `-p`, `--print <script>` | Evaluate `script` and print the result like `console.log` would |
+| `-c`, `--check` | Compile the script (or stdin) without running it; exit code 1 on a syntax error |
+| `-i`, `--interactive` | Start the REPL even if stdin is not a terminal, after running the script or `--eval` code |
+| `-v`, `--version` | Print the version (`v0.6.0`) |
+| `-h`, `--help` | Print usage |
+| `-` | Read the script from stdin (the default when no script is given and stdin is not a terminal) |
+| `--` | End of options: the next argument is the script |
+
+Short options combine (`-pe "1 + 1"`), and long options accept `--eval=code`. Options come before the script; everything after the script name is passed to it.
+
+**`process.argv`** is `[executable, script, ...arguments]` (no script entry for `--eval` and the REPL); **`process.execArgv`** holds the FrogJS options.
+
+**Exit codes:**
+- `0` - success
+- `1` - uncaught error in the main script, or the script file can't be read
+- `9` - invalid option
+
+**Uncaught errors** print the location, the source line, a caret and the stack; the event loop does not run afterwards:
+```
+app.js:3
+  return user.name;
+              ^
+
+TypeError: Cannot read properties of undefined (reading 'name')
+    at getName (app.js:3:15)
+    at app.js:6:1
+```
+Errors thrown by timer and `fs` callbacks are reported the same way, but the process keeps running.
+
+**Environment variables:**
+- `FROGJS_REPL_HISTORY` - REPL history file (default `~/.frogjs_repl_history`); an empty value disables history
+- `NO_COLOR` - disable colors in REPL output
+
+---
+
+## REPL
+
+Start it with `frogjs` (no script) in a terminal, or with `frogjs -i`.
+
+```
+> [1, 2, 3].map(n => n * 2)
+[ 2, 4, 6 ]
+> function add(a, b) {
+... return a + b }
+undefined
+> add(2, 3)
+5
+> _ * 10
+50
+```
+
+- Results are printed with `util.inspect` (colored in a terminal)
+- Input that is not finished yet (an open `{`, `(` or template literal) continues on a `...` prompt
+- Input that starts with `{` is tried as an object literal first: `{ a: 1 }` prints `{ a: 1 }`
+- `_` holds the last result, `_error` the last uncaught error
+- The event loop runs while the prompt waits: timers fire and servers accept connections, and their output is printed above the prompt
+- Without a terminal (`echo "1 + 1" | frogjs -i`), lines are read and evaluated in order without line editing; the REPL ends at the end of input
+
+| Command | Description |
+|---------|-------------|
+| `.help` | List the commands |
+| `.exit` | Exit the REPL |
+| `.clear` | Abandon the current input and start over in a fresh context (globals, declarations and the module cache are cleared) |
+| `.break` | Abandon multi-line input |
+| `.load <file>` | Evaluate a file in the session |
+| `.save <file>` | Save the lines entered so far to a file |
+
+| Key | Action |
+|-----|--------|
+| Enter | Evaluate the line |
+| Tab | Complete globals, keywords, declared names, `a.b.` properties and commands; press again to list candidates |
+| Up / Down, Ctrl+P / Ctrl+N | Browse history (saved between sessions, 1000 lines) |
+| Left / Right, Ctrl+B / Ctrl+F, Alt+B / Alt+F | Move by character / by word |
+| Home / End, Ctrl+A / Ctrl+E | Start / end of line |
+| Backspace, Delete, Ctrl+D | Delete a character |
+| Ctrl+K / Ctrl+U / Ctrl+W | Delete to end of line / to start of line / previous word |
+| Ctrl+L | Clear the screen |
+| Ctrl+C | Clear the input, or interrupt running code; twice on an empty line exits |
+| Ctrl+D | Exit (on an empty line) |
 
 ---
 
@@ -58,6 +154,81 @@ Prints to stderr with newline.
 console.error('Error occurred');
 console.error('Code:', 500, 'Message:', 'Internal Server Error');
 ```
+
+### `console.info()`, `console.debug()`, `console.warn()`
+`info` and `debug` are aliases of `console.log`; `warn` is an alias of `console.error`.
+
+### Formatting
+All console methods format their arguments with [`util.format`](#utilformatformat-args): strings are printed as-is, other values with `util.inspect`, and a first string argument may contain format specifiers.
+
+```javascript
+console.log({ a: 1, b: [1, 2] });       // { a: 1, b: [ 1, 2 ] }
+console.log('%s is %d years', 'Bob', 42); // Bob is 42 years
+```
+
+---
+
+## Util API
+
+`require('util')` (also the global `util`).
+
+### `util.inspect(value[, options])`
+Returns a string representation of `value` meant for debugging. The output matches Node.js.
+
+```javascript
+util.inspect({ a: { b: { c: { d: 1 } } } }); // '{ a: { b: { c: [Object] } } }'
+util.inspect(new Map([['k', [1, 2]]]));      // "Map(1) { 'k' => [ 1, 2 ] }"
+const obj = { name: 'loop' }; obj.self = obj;
+util.inspect(obj);                          // "<ref *1> { name: 'loop', self: [Circular *1] }"
+```
+
+**Options:**
+- `depth` (Number, default `2`): how deep to recurse into objects; `null` for no limit
+- `colors` (Boolean, default `false`): add ANSI colors
+- `showHidden` (Boolean, default `false`): include non-enumerable properties
+- `maxArrayLength` (Number, default `100`) and `maxStringLength` (Number, default `10000`)
+- `breakLength` (Number, default `80`): line length at which entries are split over lines
+- `compact` (Number or Boolean, default `3`) and `sorted` (Boolean or comparator)
+
+Shows class names (`Point { x: 1 }`), getters (`[Getter]`), functions (`[Function: name]`, `[class A extends B]`), `Map`, `Set`, typed arrays, `ArrayBuffer`, `Promise` state, `Proxy` targets, errors (stack plus extra properties), `Buffer` (`<Buffer 68 69>`), boxed primitives, dates and regular expressions.
+
+An object can define its own representation:
+```javascript
+class Money {
+    constructor(cents) { this.cents = cents; }
+    [util.inspect.custom]() { return `$${(this.cents / 100).toFixed(2)}`; }
+}
+util.inspect(new Money(1999)); // '$19.99'
+```
+
+### `util.format(format, ...args)`
+Like `printf`. Supported specifiers: `%s` (string), `%d` (number), `%i` (integer), `%f` (float), `%j` (JSON), `%o` (`inspect` with hidden properties), `%O` (`inspect`), `%c` (ignored CSS), `%%` (a literal `%`). Extra arguments are appended, separated by spaces.
+
+```javascript
+util.format('%s:%d', 'port', 8080);   // 'port:8080'
+util.format('%j', { a: 1 });          // '{"a":1}'
+util.format('a', { b: 1 }, [2]);      // 'a { b: 1 } [ 2 ]'
+```
+
+### `util.formatWithOptions(inspectOptions, format, ...args)`
+`util.format` with options passed to `inspect`.
+
+### `util.promisify(fn)`
+Wraps a function taking an `(err, value)` callback as its last argument into one returning a Promise.
+
+```javascript
+const sleep = util.promisify((ms, cb) => setTimeout(() => cb(null, ms), ms));
+sleep(100).then((ms) => console.log(`waited ${ms}ms`));
+```
+
+### `util.inherits(constructor, superConstructor)`
+Sets up prototype inheritance between constructor functions (prefer `class ... extends`).
+
+### `util.isDeepStrictEqual(a, b)`
+`true` if `a` and `b` have the same own enumerable properties and prototypes, compared recursively.
+
+### `util.stripVTControlCharacters(str)`
+Removes ANSI color codes from `str`.
 
 ---
 
@@ -792,7 +963,7 @@ Load modules.
 **Returns:** Module exports
 
 **Module Resolution:**
-1. Built-in modules (not yet implemented)
+1. Built-in modules: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`
 2. Relative paths (`./`, `../`)
 3. Absolute paths
 4. Auto-append `.js` extension
@@ -826,6 +997,17 @@ module.exports = 'my value';
 module.exports = () => {
     console.log('Hello!');
 };
+```
+
+### Errors in Modules
+An error thrown while a module loads propagates to the `require()` call, so it can be caught; uncaught, it is reported with the module's file and line.
+
+```javascript
+try {
+    require('./broken');
+} catch (err) {
+    console.error('Could not load module:', err.message);
+}
 ```
 
 ### Module Caching

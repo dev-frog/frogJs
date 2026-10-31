@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sstream>
 #include <sys/stat.h>
+#include "frogjs/errors.h"
 
 using namespace v8;
 
@@ -58,8 +59,7 @@ void ReadFileCallback(uv_fs_t* req) {
     callback->Call(context, context->Global(), 2, argv);
 
     if (try_catch.HasCaught()) {
-        String::Utf8Value error(isolate, try_catch.Exception());
-        fprintf(stderr, "Callback error: %s\n", *error);
+        frogjs::ReportException(isolate, &try_catch);
     }
 
     // Cleanup
@@ -94,8 +94,7 @@ void WriteFileCallback(uv_fs_t* req) {
     callback->Call(context, context->Global(), 1, argv);
 
     if (try_catch.HasCaught()) {
-        String::Utf8Value error(isolate, try_catch.Exception());
-        fprintf(stderr, "Callback error: %s\n", *error);
+        frogjs::ReportException(isolate, &try_catch);
     }
 
     // Cleanup
@@ -310,8 +309,7 @@ void MkdirCallback(uv_fs_t* req) {
     callback->Call(context, context->Global(), 1, argv);
 
     if (try_catch.HasCaught()) {
-        String::Utf8Value error(isolate, try_catch.Exception());
-        fprintf(stderr, "Callback error: %s\n", *error);
+        frogjs::ReportException(isolate, &try_catch);
     }
 
     file_req->callback.Reset();
@@ -436,8 +434,7 @@ void ReaddirCallback(uv_fs_t* req) {
     callback->Call(context, context->Global(), 2, argv);
 
     if (try_catch.HasCaught()) {
-        String::Utf8Value error(isolate, try_catch.Exception());
-        fprintf(stderr, "Callback error: %s\n", *error);
+        frogjs::ReportException(isolate, &try_catch);
     }
 
     file_req->callback.Reset();
@@ -524,8 +521,7 @@ void RmdirCallback(uv_fs_t* req) {
     callback->Call(context, context->Global(), 1, argv);
 
     if (try_catch.HasCaught()) {
-        String::Utf8Value error(isolate, try_catch.Exception());
-        fprintf(stderr, "Callback error: %s\n", *error);
+        frogjs::ReportException(isolate, &try_catch);
     }
 
     file_req->callback.Reset();
@@ -676,8 +672,7 @@ void StatCallback(uv_fs_t* req) {
     callback->Call(context, context->Global(), 2, argv);
 
     if (try_catch.HasCaught()) {
-        String::Utf8Value error(isolate, try_catch.Exception());
-        fprintf(stderr, "Callback error: %s\n", *error);
+        frogjs::ReportException(isolate, &try_catch);
     }
 
     file_req->callback.Reset();
@@ -787,8 +782,7 @@ void UnlinkCallback(uv_fs_t* req) {
     callback->Call(context, context->Global(), 1, argv);
 
     if (try_catch.HasCaught()) {
-        String::Utf8Value error(isolate, try_catch.Exception());
-        fprintf(stderr, "Callback error: %s\n", *error);
+        frogjs::ReportException(isolate, &try_catch);
     }
 
     file_req->callback.Reset();

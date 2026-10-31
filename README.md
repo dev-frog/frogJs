@@ -20,6 +20,8 @@
 - **Timer API**: setTimeout, setInterval, clearTimeout, clearInterval
 - **Process & Buffer**: `process` object and `Buffer` class for binary data
 - **Path & OS Utilities**: Node-compatible `path` and `os` modules
+- **REPL & CLI**: Interactive shell with history and tab completion, `--eval`/`--print`/`--check`, Node-style error reports
+- **Util**: `util.inspect` and `util.format` with the same output as Node.js (used by `console.log`)
 - **Clean Architecture**: Minimal C++ codebase with clear separation of concerns
 
 ---
@@ -98,6 +100,52 @@ console.log("Hello from FrogJS! 🐸");
 Run it:
 ```bash
 ./build/frogjs examples/hello.js
+```
+
+### REPL
+Run `frogjs` with no script to start an interactive shell:
+```
+$ ./build/frogjs
+Welcome to FrogJS v0.6.0.
+Type ".help" for more information.
+> const server = { port: 3000, routes: ['/', '/api'] }
+undefined
+> server
+{ port: 3000, routes: [ '/', '/api' ] }
+> process.ver<Tab>
+process.version   process.versions
+```
+
+- **Editing**: arrow keys, Home/End, Ctrl+A/E/K/U/W, Ctrl+L to clear the screen
+- **History**: Up/Down, saved to `~/.frogjs_repl_history` (set `FROGJS_REPL_HISTORY` to change it, or to an empty string to disable it)
+- **Tab completion** for globals, keywords, your `let`/`const` names, object properties and REPL commands
+- **Multi-line input**: unfinished code continues on a `...` prompt
+- `_` holds the last result and `_error` the last error
+- **Commands**: `.help`, `.exit`, `.clear` (fresh context), `.break`, `.load <file>`, `.save <file>`
+- **Ctrl+C** clears the line or stops running code (e.g. an endless loop); press it twice on an empty line, or Ctrl+D, to exit
+- Timers and servers keep running between prompts
+
+### Command Line
+```bash
+frogjs script.js [args...]        # run a script
+frogjs -e "console.log(1 + 1)"    # evaluate code
+frogjs -p "os.cpus().length"      # evaluate and print the result
+frogjs -c script.js               # syntax check only
+frogjs -i -e "var x = 1"          # run code, then start the REPL
+echo "console.log('hi')" | frogjs # read the script from stdin
+frogjs --version                  # v0.6.0
+frogjs --help                     # all options
+```
+
+Uncaught errors are reported like Node.js does, and the process exits with code 1:
+```
+app.js:3
+  return user.name;
+              ^
+
+TypeError: Cannot read properties of undefined (reading 'name')
+    at getName (app.js:3:15)
+    at app.js:6:1
 ```
 
 ### HTTP Server
@@ -214,6 +262,8 @@ Check out the `examples/` directory for more samples:
 - `examples/modules/` - Module system examples
 - `examples/test-path.js` - Path module usage
 - `examples/test-os.js` - OS module usage
+- `examples/test-util.js` - Util module self-test (`inspect`, `format`)
+- `examples/test-cli.sh` - CLI and REPL self-test
 
 Run examples:
 ```bash
@@ -231,7 +281,9 @@ Run examples:
 frogjs/
 ├── src/
 │   ├── core/
-│   │   └── runtime.cpp       # Main entry point
+│   │   ├── runtime.cpp       # Main entry point, command-line options, console
+│   │   ├── repl.cpp          # Interactive REPL
+│   │   └── line_editor.cpp   # Line editing, history and completion for the REPL
 │   └── bindings/
 │       ├── process.cpp      # process object
 │       ├── buffer.cpp       # Buffer class
@@ -243,9 +295,11 @@ frogjs/
 │       ├── http.cpp         # HTTP server & client (JS on top of net)
 │       ├── path.cpp         # Path utilities
 │       ├── os.cpp           # OS information
+│       ├── util.cpp         # util.inspect / util.format (embedded JS)
 │       └── modules.cpp      # Module system
 │   └── utils/
-│       └── js_module.cpp    # Loader for modules written in embedded JS
+│       ├── js_module.cpp    # Loader for modules written in embedded JS
+│       └── errors.cpp       # Node-style uncaught error reports
 ├── examples/                # Example scripts
 ├── docs/                    # Documentation
 ├── include/frogjs/          # Shared headers (V8 compat, Buffer, JS module loader)
@@ -262,7 +316,7 @@ frogjs/
 
 ### Implemented
 - Core runtime with V8 integration
-- Console API (log, error)
+- Console API (log, info, debug, error, warn) with `util.format` formatting
 - Timer API (setTimeout, setInterval, etc.)
 - File system operations (sync & async)
 - TCP server/client networking
@@ -270,8 +324,11 @@ frogjs/
 - Events module (EventEmitter, events.once, events.on)
 - Streams (Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished)
 - Module system (require, exports, caching)
-- Error handling with stack traces
-- Process object (argv, env, exit, cwd, pid, platform)
+- Error handling with stack traces and source excerpts
+- REPL (history, tab completion, multi-line input, commands)
+- CLI options (--eval, --print, --check, --interactive, --version, --help)
+- Util module (inspect, format, promisify, inherits, isDeepStrictEqual)
+- Process object (argv, execArgv, env, exit, cwd, pid, platform, version, versions)
 - Buffer class for binary data
 - Additional FS operations (mkdir, rmdir, stat, readdir, unlink, existsSync)
 - Path module (join, resolve, normalize, dirname, basename, extname, isAbsolute)
@@ -280,7 +337,7 @@ frogjs/
 
 ### Planned
 - File streams (fs.createReadStream / fs.createWriteStream)
-- REPL mode
+- Crypto module
 - Worker threads
 - Windows support
 
@@ -374,7 +431,7 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Version**: 0.5.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
+**Version**: 0.6.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
 **Status**: Active Development
 **Last Updated**: 2026-10-16
 

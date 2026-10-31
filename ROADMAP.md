@@ -1,6 +1,6 @@
 # FrogJS Development Roadmap
 
-## 📊 Current Status: Version 0.5.0
+## 📊 Current Status: Version 0.6.0
 
 ### ✅ Completed (v0.1.0)
 - Core V8 runtime integration
@@ -37,6 +37,14 @@
 - `pipe()` with backpressure, async iteration, `Readable.from()`
 - HTTP classes are `EventEmitter`s; `IncomingMessage` is a `Readable` (`req.pipe(res)`, `for await`)
 - `Buffer.concat()`, `Buffer.isBuffer()`
+
+### ✅ Completed (v0.6.0)
+- REPL: line editing, persistent history, tab completion, multi-line input, `.help`/`.exit`/`.clear`/`.break`/`.load`/`.save`, `_`/`_error`, Ctrl+C interrupts running code
+- CLI: `--version`, `--help`, `--eval`, `--print`, `--check`, `--interactive`, `-` (stdin)
+- Node.js-style uncaught error reports (file:line, source line, caret, stack) and exit code 1
+- Util module: `util.inspect` (Node-identical output), `util.format`, `promisify`, `inherits`, `isDeepStrictEqual`
+- `console.log` formats objects with `util.inspect`; `console.info`/`debug`/`warn`
+- `process.versions`, `process.execArgv`
 
 ---
 
@@ -232,7 +240,7 @@ void SetupEvents(Isolate* isolate, Local<Context> context);
 
 ---
 
-### Version 0.6.0 - REPL & CLI Improvements (Recommended Next Step)
+### Version 0.6.0 - REPL & CLI Improvements ✅ Completed
 
 **Priority: MEDIUM**
 **Estimated Effort: 2-3 weeks**
@@ -257,6 +265,18 @@ void StartREPL(Isolate* isolate);
 - `--print` flag (print result)
 - Better error messages
 - Help text
+
+**Implementation Notes:**
+- `src/core/repl.cpp` runs the REPL on the libuv loop (stdin is a `uv_poll` handle), so timers and sockets keep working between prompts and async `console.log` output is printed above the prompt
+- Line editing is a small built-in editor (`src/core/line_editor.cpp`) instead of GNU readline (GPL) or libedit, whose callback API on macOS doesn't report Ctrl+D or the current line; no new dependency
+- History is saved to `~/.frogjs_repl_history` (`FROGJS_REPL_HISTORY` overrides it, empty disables it), 1000 lines
+- Tab completion covers globals, keywords, top-level `let`/`const`/`class` names, properties of `a.b.c` chains (prototype chain included) and REPL commands
+- Incomplete input (`Unexpected end of input`, unterminated template literals) continues on a `...` prompt; `{ ... }` is evaluated as an object literal
+- Ctrl+C during evaluation stops the script through `Isolate::TerminateExecution` from a watchdog thread; `.clear` builds a fresh context with all bindings
+- `util.inspect` is a port of Node's layout rules (line breaking, array grouping, quoting, circular refs) and `examples/test-util.js` passes under both runtimes
+- `require()` now propagates errors thrown by a module (previously it printed them and returned `undefined`), and module line numbers in errors match the file
+- Like Node.js, an uncaught error in the main script exits with code 1 without running the event loop; errors in timer and fs callbacks are reported with their stack but don't stop the process yet
+- Not included yet: top-level `await` in the REPL, `.editor` mode, unhandled-rejection reporting
 
 ---
 
@@ -394,8 +414,8 @@ declare module 'http' { ... }
 - **v0.3.0**: ✅ Completed
 - **v0.4.0**: ✅ Done
 - **v0.5.0**: ✅ Done
-- **v0.6.0**: 2-3 weeks (recommended immediate focus)
-- **v0.7.0**: 2 weeks
+- **v0.6.0**: ✅ Done
+- **v0.7.0**: 2 weeks (recommended immediate focus)
 - **v0.8.0**: 4-6 weeks
 - **v0.9.0**: 2-3 weeks
 - **v1.0.0**: 4-6 weeks
@@ -406,13 +426,15 @@ declare module 'http' { ... }
 
 ## 🚀 Quick Start Recommendation
 
-Next up is **v0.6.0** (REPL & CLI). Smaller follow-ups that build on v0.5.0:
+Next up is **v0.7.0** (Crypto). Smaller follow-ups that build on earlier versions:
 - `fs.createReadStream` / `fs.createWriteStream` on top of `stream.Readable`/`Writable`
 - Make `net` sockets `Duplex` streams so `socket.write()` reports backpressure (HTTP responses would inherit it)
+- Top-level `await` in the REPL; report unhandled promise rejections
+- `fs` callbacks receive error strings, not `Error` objects, and `fs.readFile` has no encoding argument
 
 ```bash
 # Create implementation branch
-git checkout -b feature/repl-cli
+git checkout -b feature/crypto
 
 # Focus on one feature at a time
 # Test thoroughly with examples

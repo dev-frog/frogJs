@@ -52,23 +52,29 @@ The architecture follows the same fundamental design as Node.js but with a simpl
 The main entry point that orchestrates the entire system.
 
 **Key Responsibilities:**
+- Parse command-line options (`--eval`, `--print`, `--check`, `--interactive`, ...)
 - Initialize V8 platform and create isolates
 - Set up execution contexts
-- Load and execute JavaScript files
-- Manage the event loop
+- Load and execute JavaScript files, `--eval` code or stdin
+- Manage the event loop, or hand over to the REPL
 - Handle cleanup and shutdown
 
 **Initialization Flow:**
 ```
 main()
+  ├── Parse Options (--help / --version exit here, bad options exit with 9)
+  ├── Pick the Source (--eval code, script file, stdin, or none → REPL)
   ├── Initialize V8 Platform
   ├── Create Isolate
-  ├── Create Context
-  ├── Setup Bindings (Console, Timers, FS, Net, Modules)
-  ├── Execute User Script
-  ├── Run Event Loop (until no more work)
+  ├── CreateContext()
+  │     └── Setup Bindings (Console, Util, Process, Buffer, Timers, FS, Net,
+  │         Events, Stream, HTTP, Path, OS, Modules)
+  ├── Execute the Source (uncaught error → report, exit code 1)
+  ├── Run Event Loop (until no more work), or StartREPL()
   └── Cleanup (Isolate, V8, libuv)
 ```
+
+`CreateContext()` is also what the REPL's `.clear` calls to start over with a fresh global object.
 
 **V8 Objects:**
 - **Isolate**: Independent V8 engine instance with own heap
@@ -85,6 +91,14 @@ C++ functions that expose system functionality to JavaScript.
 void ConsoleLog(const FunctionCallbackInfo<Value>& args)
 void ConsoleError(const FunctionCallbackInfo<Value>& args)
 void SetupConsole(Isolate* isolate, Local<Context> context)
+```
+Arguments are formatted by `util.format` (`frogjs::Format`).
+
+#### Util (`src/bindings/util.cpp`)
+`util.inspect` and `util.format` are written in JavaScript embedded in the C++ file (like `events`, `stream` and `http`). A few native helpers are passed in for what JavaScript can't see: a `Proxy`'s target, a `Promise`'s state, boxed primitives and `Buffer` bytes. C++ code calls them through `include/frogjs/util.h`:
+```cpp
+std::string frogjs::Inspect(Isolate*, Local<Context>, Local<Value>, bool colors);
+bool frogjs::Format(Isolate*, Local<Context>, const FunctionCallbackInfo<Value>&, std::string* out);
 ```
 
 #### Timers (`src/bindings/timers.cpp`)
@@ -163,7 +177,25 @@ while (uv_run(uv_default_loop(), UV_RUN_DEFAULT)) {
 5. **Check**: execute setImmediate callbacks (not yet implemented)
 6. **Close Callbacks**: Handle cleanup
 
-### 4. Memory Management
+### 4. REPL (`src/core/repl.cpp`, `src/core/line_editor.cpp`)
+
+The REPL doesn't block on input. stdin is watched with a `uv_poll_t`, so the event loop keeps running timers and sockets while the prompt waits:
+
+```
+StartREPL()
+  ├── uv_poll on stdin ──► bytes ──► LineEditor::Feed()
+  │                                   ├── kLine      → evaluate, print, new prompt
+  │                                   ├── kInterrupt → clear input / warn / exit
+  │                                   └── kEof       → exit
+  └── uv_run() until the REPL closes
+```
+
+- **LineEditor** puts the terminal in raw mode while the prompt is shown and back to normal mode while code runs. It handles cursor keys, Emacs-style editing keys, history and tab completion, and redraws the prompt after async output (`ReplBeforeOutput()` / `ReplAfterOutput()` around each console write).
+- **Evaluation** compiles each input as a script named `REPL<n>`. A `SyntaxError` at the end of the input ("Unexpected end of input") keeps the input buffered for the next line.
+- **Ctrl+C while code runs**: the SIGINT handler writes a byte to a pipe; a watchdog thread reads it and calls `Isolate::TerminateExecution()`, the one V8 call that may be made from another thread. The evaluation then sees `HasTerminated()` and calls `CancelTerminateExecution()`.
+- **Without a terminal** (piped input) the REPL reads plain lines and has no editing.
+
+### 5. Memory Management
 
 #### V8 Handle Management
 ```cpp
@@ -210,13 +242,15 @@ require('./module')
 
 ### Module Wrapper Function
 
-Each module is wrapped in a function:
+Each module is wrapped in a function. The script is compiled with a line offset of -1 so that line numbers in error messages match the module file:
 ```javascript
 (function(exports, require, module, __filename, __dirname) {
     // Module code here
     module.exports = { /* exports */ };
 });
 ```
+
+Compile errors and exceptions thrown while the module runs propagate out of `require()` to the caller.
 
 ### Module Caching
 
@@ -261,6 +295,7 @@ JavaScript Call with Callback
 - All JavaScript execution happens on main thread
 - libuv thread pool used for file I/O
 - Callbacks execute on main thread
+- The REPL's Ctrl+C watchdog thread only calls `Isolate::TerminateExecution()` (thread-safe) or `uv_async_send()` (thread-safe)
 
 ### Thread Safety Considerations
 ```cpp
@@ -276,21 +311,15 @@ HandleScope handle_scope(isolate);
 ## Error Handling Architecture
 
 ### JavaScript Errors
+Uncaught errors go through `frogjs::ReportException()` (`src/utils/errors.cpp`), which prints the location, source line and caret from the `v8::Message`, then the exception through `util.inspect` (an error's stack plus any extra properties such as `code`):
 ```cpp
 TryCatch try_catch(isolate);
 if (!script->Run(context).ToLocal(&result)) {
-    // Exception occurred
-    String::Utf8Value error(isolate, try_catch.Exception());
-    fprintf(stderr, "Error: %s\n", *error);
-
-    // Print stack trace
-    Local<Value> stack_trace;
-    if (try_catch.StackTrace(context).ToLocal(&stack_trace)) {
-        String::Utf8Value stack(isolate, stack_trace);
-        fprintf(stderr, "%s\n", *stack);
-    }
+    frogjs::ReportException(isolate, &try_catch);
+    return false;  // main() exits with code 1
 }
 ```
+Timer and `fs` callbacks report errors the same way and keep the process running.
 
 ### C++ Error Handling
 ```cpp

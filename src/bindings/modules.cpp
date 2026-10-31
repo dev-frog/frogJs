@@ -7,11 +7,20 @@
 #include <libgen.h>
 #include <unistd.h>
 #include <limits.h>
+#include <sys/stat.h>
 
 using namespace v8;
 
 // Module cache: filepath -> exports object
 std::map<std::string, Persistent<Object>> moduleCache;
+
+// Forget loaded modules (the REPL's .clear starts over with a fresh context)
+void ClearModuleCache() {
+    for (auto& entry : moduleCache) {
+        entry.second.Reset();
+    }
+    moduleCache.clear();
+}
 
 // Get absolute path
 std::string GetAbsolutePath(const std::string& path, const std::string& basePath) {
@@ -42,31 +51,26 @@ std::string ReadModuleFile(const std::string& filepath) {
     return buffer.str();
 }
 
+// Canonical path of an existing regular file, or "" if there is none
+static std::string ExistingFile(const std::string& path) {
+    struct stat info;
+    if (stat(path.c_str(), &info) != 0 || !S_ISREG(info.st_mode)) {
+        return "";
+    }
+    char resolved[PATH_MAX];
+    return realpath(path.c_str(), resolved) ? std::string(resolved) : path;
+}
+
 // Resolve module path (.js extension, index.js, etc.)
 std::string ResolveModulePath(const std::string& path, const std::string& basePath) {
     std::string absPath = GetAbsolutePath(path, basePath);
 
-    // Try exact path
-    std::ifstream test(absPath);
-    if (test.good()) {
-        test.close();
-        return absPath;
-    }
-
-    // Try with .js extension
-    std::string withJs = absPath + ".js";
-    test.open(withJs);
-    if (test.good()) {
-        test.close();
-        return withJs;
-    }
-
-    // Try as directory with index.js
-    std::string withIndex = absPath + "/index.js";
-    test.open(withIndex);
-    if (test.good()) {
-        test.close();
-        return withIndex;
+    // Try exact path, then with .js extension, then as directory with index.js
+    for (const std::string& candidate : {absPath, absPath + ".js", absPath + "/index.js"}) {
+        std::string found = ExistingFile(candidate);
+        if (!found.empty()) {
+            return found;
+        }
     }
 
     return "";
@@ -88,8 +92,8 @@ void Require(const FunctionCallbackInfo<Value>& args) {
     Local<Context> context = isolate->GetCurrentContext();
 
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(String::NewFromUtf8(isolate,
-            "require expects a string path").ToLocalChecked());
+        isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate,
+            "require expects a string path").ToLocalChecked()));
         return;
     }
 
@@ -99,7 +103,7 @@ void Require(const FunctionCallbackInfo<Value>& args) {
     Local<Object> global = context->Global();
 
     // Built-in modules are exposed as globals; require() returns the same object
-    static const char* builtinModules[] = {"fs", "net", "http", "path", "os", "events", "stream"};
+    static const char* builtinModules[] = {"fs", "net", "http", "path", "os", "events", "stream", "util"};
     for (const char* name : builtinModules) {
         if (requestedPath == name) {
             args.GetReturnValue().Set(global->Get(context,
@@ -139,7 +143,7 @@ void Require(const FunctionCallbackInfo<Value>& args) {
     std::string code = ReadModuleFile(filepath);
     if (code.empty()) {
         std::string error = "Failed to read module '" + filepath + "'";
-        isolate->ThrowException(String::NewFromUtf8(isolate, error.c_str()).ToLocalChecked());
+        isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, error.c_str()).ToLocalChecked()));
         return;
     }
 
@@ -158,37 +162,28 @@ void Require(const FunctionCallbackInfo<Value>& args) {
         code + "\n" +
         "})";
 
-    // Compile the wrapped code
+    // Compile the wrapped code. The line offset hides the header line, so
+    // line numbers in errors match the module file.
     Local<String> source = String::NewFromUtf8(isolate, wrappedCode.c_str()).ToLocalChecked();
     Local<String> filename = String::NewFromUtf8(isolate, filepath.c_str()).ToLocalChecked();
-    ScriptOrigin origin(filename);
+    ScriptOrigin origin(filename, -1);
 
-    TryCatch try_catch(isolate);
+    // Compile and run errors propagate to the caller of require(), which
+    // reports them with the module's file and line if nothing catches them
     Local<Script> script;
     if (!Script::Compile(context, source, &origin).ToLocal(&script)) {
-        String::Utf8Value error(isolate, try_catch.Exception());
-        Local<Message> message = try_catch.Message();
-        if (!message.IsEmpty()) {
-            String::Utf8Value filename(isolate, message->GetScriptResourceName());
-            int linenum = message->GetLineNumber(context).FromJust();
-            fprintf(stderr, "%s:%d: %s\n", *filename, linenum, *error);
-        } else {
-            fprintf(stderr, "Module compile error: %s\n", *error);
-        }
         return;
     }
 
     // Run the script to get the wrapper function
     Local<Value> result;
     if (!script->Run(context).ToLocal(&result)) {
-        String::Utf8Value error(isolate, try_catch.Exception());
-        fprintf(stderr, "Module script error: %s\n", *error);
         return;
     }
 
     if (!result->IsFunction()) {
-        isolate->ThrowException(String::NewFromUtf8(isolate,
-            "Module wrapper is not a function").ToLocalChecked());
+        isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate,
+            "Module wrapper is not a function").ToLocalChecked()));
         return;
     }
 
@@ -210,22 +205,6 @@ void Require(const FunctionCallbackInfo<Value>& args) {
 
     // Execute the module
     if (!wrapperFn->Call(context, context->Global(), 5, argv).ToLocal(&result)) {
-        String::Utf8Value error(isolate, try_catch.Exception());
-        Local<Message> message = try_catch.Message();
-        if (!message.IsEmpty()) {
-            String::Utf8Value filename(isolate, message->GetScriptResourceName());
-            int linenum = message->GetLineNumber(context).FromJust();
-            fprintf(stderr, "%s:%d: %s\n", *filename, linenum, *error);
-
-            // Print stack trace
-            Local<Value> stack_trace_value;
-            if (try_catch.StackTrace(context).ToLocal(&stack_trace_value)) {
-                String::Utf8Value stack_trace(isolate, stack_trace_value);
-                fprintf(stderr, "%s\n", *stack_trace);
-            }
-        } else {
-            fprintf(stderr, "Module execution error: %s\n", *error);
-        }
         return;
     }
 
@@ -234,8 +213,8 @@ void Require(const FunctionCallbackInfo<Value>& args) {
         String::NewFromUtf8(isolate, "exports").ToLocalChecked()).ToLocalChecked();
 
     if (!finalExports->IsObject()) {
-        isolate->ThrowException(String::NewFromUtf8(isolate,
-            "Module exports must be an object").ToLocalChecked());
+        isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate,
+            "Module exports must be an object").ToLocalChecked()));
         return;
     }
 

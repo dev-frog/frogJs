@@ -1,6 +1,7 @@
 #include <v8.h>
 #include <uv.h>
 #include <map>
+#include "frogjs/errors.h"
 
 using namespace v8;
 
@@ -34,8 +35,7 @@ void TimerCallback(uv_timer_t* handle) {
     callback->Call(context, context->Global(), 0, nullptr);
 
     if (try_catch.HasCaught()) {
-        String::Utf8Value error(isolate, try_catch.Exception());
-        fprintf(stderr, "Timer callback error: %s\n", *error);
+        frogjs::ReportException(isolate, &try_catch);
     }
 
     // If it's not a repeating timer, clean up

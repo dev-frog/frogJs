@@ -10,12 +10,13 @@ FrogJS is a lightweight JavaScript runtime built on V8 and libuv, providing Node
 - **V8 JavaScript Engine Integration**: Full ECMAScript support through V8
 - **Event Loop**: Non-blocking I/O powered by libuv
 - **Module System**: CommonJS-style `require()` with caching
-- **Error Handling**: Stack traces and detailed error messages
+- **Error Handling**: Node-style reports of uncaught errors (file:line, source line with caret, stack) and exit code 1
 - **Global Objects**: `__filename`, `__dirname` support
 
 ### 2. Console API
-- `console.log(...args)` - Output to stdout
-- `console.error(...args)` - Output to stderr
+- `console.log(...args)`, `console.info()`, `console.debug()` - Output to stdout
+- `console.error(...args)`, `console.warn()` - Output to stderr
+- Arguments are formatted with `util.format`: objects are pretty-printed (`{ a: 1 }`, `[ 1, 2 ]`) and `%s %d %i %f %j %o %O %c %%` are supported
 
 ### 3. Timer API
 - `setTimeout(callback, delay)` - Execute callback after delay
@@ -139,6 +140,24 @@ Node.js-style streams (`require('stream')`, also the global `stream`)
 ### 12. Buffer
 - `Buffer.alloc(size)`, `Buffer.from(string | array)`, `Buffer.byteLength(string)`, `Buffer.concat(list[, totalLength])`, `Buffer.isBuffer(value)`
 - `buf.toString()`, `buf.write(string[, offset])`, `buf.slice([start][, end])`, `buf.length`
+
+### 13. Util API
+`require('util')`, also the global `util`
+- `util.inspect(value[, options])` - same output as Node.js: line breaking at 80 columns, arrays of more than 6 items in columns, quoting, `[Circular *1]` references, class names, getters, `Map`/`Set`/typed arrays/`Promise`/`Proxy`/`Error`/`Buffer`
+  - Options: `depth` (2), `colors`, `showHidden`, `maxArrayLength`, `maxStringLength`, `breakLength`, `compact`, `sorted`
+  - Objects can customize their output with `[util.inspect.custom](depth, options, inspect)`
+- `util.format(format, ...args)`, `util.formatWithOptions(options, format, ...args)`
+- `util.promisify(fn)`, `util.inherits(ctor, superCtor)`, `util.isDeepStrictEqual(a, b)`, `util.stripVTControlCharacters(str)`
+
+### 14. REPL & Command Line
+- `frogjs` with no script (and a terminal) starts the REPL
+  - Line editing (arrows, Home/End, Ctrl+A/E/B/F/K/U/W/L, Alt+B/F), history in `~/.frogjs_repl_history` (`FROGJS_REPL_HISTORY`), tab completion
+  - Multi-line input, `{ ... }` evaluated as an object literal, colored results (disable with `NO_COLOR`)
+  - `_` / `_error`, commands `.help` `.exit` `.clear` `.break` `.load` `.save`
+  - Ctrl+C clears the line or interrupts running code; Ctrl+D or Ctrl+C twice exits
+  - The event loop keeps running between prompts
+- Options: `-e/--eval`, `-p/--print`, `-c/--check`, `-i/--interactive`, `-v/--version`, `-h/--help`, `-` (script from stdin), `--`
+- Invalid options exit with code 9; uncaught errors in the main script exit with code 1
 
 ## 📖 Usage Examples
 
@@ -328,21 +347,23 @@ console.log('Home:', os.homedir());
 - TCP server/client
 - HTTP server/client
 - Module system with caching
-- Error handling with stack traces
-- Process object (argv, env, exit, cwd, pid, platform, version)
+- Error handling with stack traces and source excerpts
+- Process object (argv, execArgv, env, exit, cwd, pid, platform, version, versions)
 - Buffer class for binary data
 - Additional FS operations (mkdir, rmdir, stat, readdir, unlink, existsSync)
 - Path module
 - OS module
 - Events module (EventEmitter)
 - Streams (Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished)
+- Util module (inspect, format)
+- REPL and command-line options
 
 ### In Progress 🔨
 - None currently
 
 ### Planned Features ⏳
 - `fs.createReadStream` / `fs.createWriteStream`
-- REPL mode
+- Crypto module
 - Worker threads
 - Native ESM support (import/export)
 - TypeScript definitions
@@ -376,6 +397,10 @@ Run example scripts to test features:
 # Path & OS
 ./build/frogjs examples/test-path.js
 ./build/frogjs examples/test-os.js
+
+# Util, CLI & REPL
+./build/frogjs examples/test-util.js
+./examples/test-cli.sh
 ```
 
 ## 📊 Performance
@@ -408,5 +433,5 @@ FrogJS aims for CommonJS compatibility but is not fully Node.js compatible. Focu
 
 ---
 
-**Last Updated**: 2025-10-28
-**Version**: 0.1.0 (Development)
+**Last Updated**: 2026-10-31
+**Version**: 0.6.0 (Development)

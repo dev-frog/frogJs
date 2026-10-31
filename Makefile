@@ -16,6 +16,10 @@ CXXFLAGS = -std=c++20 -Wall -Wextra $(V8_DEFINES) -Iinclude -isystem $(V8_PATH)/
 # Libraries
 V8_LIBS = -L$(V8_PATH)/lib -lv8 -lv8_libplatform
 LIBUV_LIBS = -L$(LIBUV_PATH)/lib -luv
+# The REPL's Ctrl+C watchdog runs on a thread
+ifneq ($(shell uname -s),Darwin)
+LIBUV_LIBS += -lpthread
+endif
 
 # Source and build directories
 SRC_DIR = src
@@ -26,6 +30,8 @@ TARGET = $(BUILD_DIR)/frogjs
 
 # Source files
 SRCS = $(SRC_DIR)/core/runtime.cpp \
+       $(SRC_DIR)/core/repl.cpp \
+       $(SRC_DIR)/core/line_editor.cpp \
        $(SRC_DIR)/bindings/process.cpp \
        $(SRC_DIR)/bindings/buffer.cpp \
        $(SRC_DIR)/bindings/timers.cpp \
@@ -37,7 +43,9 @@ SRCS = $(SRC_DIR)/core/runtime.cpp \
        $(SRC_DIR)/bindings/path.cpp \
        $(SRC_DIR)/bindings/os.cpp \
        $(SRC_DIR)/bindings/modules.cpp \
-       $(SRC_DIR)/utils/js_module.cpp
+       $(SRC_DIR)/bindings/util.cpp \
+       $(SRC_DIR)/utils/js_module.cpp \
+       $(SRC_DIR)/utils/errors.cpp
 
 # Object files
 OBJS = $(SRCS:.cpp=.o)

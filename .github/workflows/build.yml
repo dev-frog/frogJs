@@ -56,6 +56,8 @@ jobs:
         ./build/frogjs examples/test-http.js
         ./build/frogjs examples/test-events.js
         ./build/frogjs examples/test-streams.js
+        ./build/frogjs examples/test-util.js
+        ./examples/test-cli.sh ./build/frogjs
 
     - name: Upload build artifact
       if: success()

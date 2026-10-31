@@ -4,20 +4,14 @@
 #include <cstring>
 #include <unistd.h>
 #include <sys/types.h>
+#include <string>
+#include <vector>
+#include "frogjs/version.h"
 
 using namespace v8;
 
-// Global storage for argc/argv (needed for process.argv)
-static int g_argc = 0;
-static char** g_argv = nullptr;
 static Isolate* g_isolate = nullptr;
 static Persistent<Object> g_process_object;
-
-// Store argc/argv for later use
-void StoreCommandLineArgs(int argc, char* argv[]) {
-    g_argc = argc;
-    g_argv = argv;
-}
 
 // process.exit(code)
 void ProcessExit(const FunctionCallbackInfo<Value>& args) {
@@ -47,20 +41,32 @@ void ProcessCwd(const FunctionCallbackInfo<Value>& args) {
     }
 }
 
-// Create process.argv array
-Local<Array> CreateArgvArray(Isolate* isolate) {
+// Create a JS array of strings (process.argv, process.execArgv)
+Local<Array> CreateStringArray(Isolate* isolate, const std::vector<std::string>& values) {
     Local<Context> context = isolate->GetCurrentContext();
-    Local<Array> argv_array = Array::New(isolate, g_argc);
+    Local<Array> array = Array::New(isolate, static_cast<int>(values.size()));
 
-    for (int i = 0; i < g_argc; i++) {
-        if (g_argv[i] != nullptr) {
-            argv_array->Set(context, i, String::NewFromUtf8(isolate, g_argv[i]).ToLocalChecked()).Check();
-        } else {
-            argv_array->Set(context, i, Null(isolate)).Check();
-        }
+    for (size_t i = 0; i < values.size(); i++) {
+        array->Set(context, static_cast<uint32_t>(i),
+            String::NewFromUtf8(isolate, values[i].c_str()).ToLocalChecked()).Check();
     }
 
-    return argv_array;
+    return array;
+}
+
+// Create process.versions object
+Local<Object> CreateVersionsObject(Isolate* isolate) {
+    Local<Context> context = isolate->GetCurrentContext();
+    Local<Object> versions = Object::New(isolate);
+
+    versions->Set(context, String::NewFromUtf8(isolate, "frogjs").ToLocalChecked(),
+        String::NewFromUtf8(isolate, FROGJS_VERSION).ToLocalChecked()).Check();
+    versions->Set(context, String::NewFromUtf8(isolate, "v8").ToLocalChecked(),
+        String::NewFromUtf8(isolate, V8::GetVersion()).ToLocalChecked()).Check();
+    versions->Set(context, String::NewFromUtf8(isolate, "uv").ToLocalChecked(),
+        String::NewFromUtf8(isolate, uv_version_string()).ToLocalChecked()).Check();
+
+    return versions;
 }
 
 // Create process.env object
@@ -112,10 +118,10 @@ Local<String> GetPlatformString(Isolate* isolate) {
     return String::NewFromUtf8(isolate, platform).ToLocalChecked();
 }
 
-// Set up global process object
-void SetupProcess(Isolate* isolate, Local<Context> context, int argc, char* argv[]) {
-    // Store command-line arguments globally
-    StoreCommandLineArgs(argc, argv);
+// Set up global process object. argv is [executable, script, ...script args]
+// (no script entry for --eval and the REPL); exec_argv holds the FrogJS options.
+void SetupProcess(Isolate* isolate, Local<Context> context, const std::vector<std::string>& argv,
+                  const std::vector<std::string>& exec_argv) {
     g_isolate = isolate;
 
     // Create process object
@@ -140,7 +146,14 @@ void SetupProcess(Isolate* isolate, Local<Context> context, int argc, char* argv
     process->Set(
         context,
         String::NewFromUtf8(isolate, "argv").ToLocalChecked(),
-        CreateArgvArray(isolate)
+        CreateStringArray(isolate, argv)
+    ).Check();
+
+    // process.execArgv
+    process->Set(
+        context,
+        String::NewFromUtf8(isolate, "execArgv").ToLocalChecked(),
+        CreateStringArray(isolate, exec_argv)
     ).Check();
 
     // process.env
@@ -168,7 +181,14 @@ void SetupProcess(Isolate* isolate, Local<Context> context, int argc, char* argv
     process->Set(
         context,
         String::NewFromUtf8(isolate, "version").ToLocalChecked(),
-        String::NewFromUtf8(isolate, "v0.5.0").ToLocalChecked()
+        String::NewFromUtf8(isolate, "v" FROGJS_VERSION).ToLocalChecked()
+    ).Check();
+
+    // process.versions
+    process->Set(
+        context,
+        String::NewFromUtf8(isolate, "versions").ToLocalChecked(),
+        CreateVersionsObject(isolate)
     ).Check();
 
     // Store persistent reference
