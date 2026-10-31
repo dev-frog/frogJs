@@ -57,7 +57,7 @@ void ReadFileCallback(uv_fs_t* req) {
     // Call the JavaScript callback
     Local<Function> callback = Local<Function>::New(isolate, file_req->callback);
     TryCatch try_catch(isolate);
-    callback->Call(context, context->Global(), 2, argv);
+    (void)callback->Call(context, context->Global(), 2, argv);  // a throw is reported below
 
     if (try_catch.HasCaught()) {
         frogjs::ReportException(isolate, &try_catch);
@@ -92,7 +92,7 @@ void WriteFileCallback(uv_fs_t* req) {
     // Call the JavaScript callback
     Local<Function> callback = Local<Function>::New(isolate, file_req->callback);
     TryCatch try_catch(isolate);
-    callback->Call(context, context->Global(), 1, argv);
+    (void)callback->Call(context, context->Global(), 1, argv);  // a throw is reported below
 
     if (try_catch.HasCaught()) {
         frogjs::ReportException(isolate, &try_catch);
@@ -307,7 +307,7 @@ void MkdirCallback(uv_fs_t* req) {
 
     Local<Function> callback = Local<Function>::New(isolate, file_req->callback);
     TryCatch try_catch(isolate);
-    callback->Call(context, context->Global(), 1, argv);
+    (void)callback->Call(context, context->Global(), 1, argv);  // a throw is reported below
 
     if (try_catch.HasCaught()) {
         frogjs::ReportException(isolate, &try_catch);
@@ -432,7 +432,7 @@ void ReaddirCallback(uv_fs_t* req) {
 
     Local<Function> callback = Local<Function>::New(isolate, file_req->callback);
     TryCatch try_catch(isolate);
-    callback->Call(context, context->Global(), 2, argv);
+    (void)callback->Call(context, context->Global(), 2, argv);  // a throw is reported below
 
     if (try_catch.HasCaught()) {
         frogjs::ReportException(isolate, &try_catch);
@@ -519,7 +519,7 @@ void RmdirCallback(uv_fs_t* req) {
 
     Local<Function> callback = Local<Function>::New(isolate, file_req->callback);
     TryCatch try_catch(isolate);
-    callback->Call(context, context->Global(), 1, argv);
+    (void)callback->Call(context, context->Global(), 1, argv);  // a throw is reported below
 
     if (try_catch.HasCaught()) {
         frogjs::ReportException(isolate, &try_catch);
@@ -670,7 +670,7 @@ void StatCallback(uv_fs_t* req) {
 
     Local<Function> callback = Local<Function>::New(isolate, file_req->callback);
     TryCatch try_catch(isolate);
-    callback->Call(context, context->Global(), 2, argv);
+    (void)callback->Call(context, context->Global(), 2, argv);  // a throw is reported below
 
     if (try_catch.HasCaught()) {
         frogjs::ReportException(isolate, &try_catch);
@@ -780,7 +780,7 @@ void UnlinkCallback(uv_fs_t* req) {
 
     Local<Function> callback = Local<Function>::New(isolate, file_req->callback);
     TryCatch try_catch(isolate);
-    callback->Call(context, context->Global(), 1, argv);
+    (void)callback->Call(context, context->Global(), 1, argv);  // a throw is reported below
 
     if (try_catch.HasCaught()) {
         frogjs::ReportException(isolate, &try_catch);

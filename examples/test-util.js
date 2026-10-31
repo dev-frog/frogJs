@@ -50,7 +50,7 @@ check('custom inspect', inspect({ [inspect.custom]() { return 'custom!'; } }), '
 
 console.log('inspect: arrays and collections');
 check('array', inspect([1, 'a', null]), "[ 1, 'a', null ]");
-check('sparse array', inspect([1, , 3]), '[ 1, <1 empty item>, 3 ]');
+check('sparse array', inspect([1, , 3]), '[ 1, <1 empty item>, 3 ]'); // eslint-disable-line no-sparse-arrays
 check('long number array is grouped', inspect([1, 2, 3, 4, 5, 6, 7]), '[\n  1, 2, 3, 4,\n  5, 6, 7\n]');
 check('more than 100 items', inspect(new Array(101).fill(0)).endsWith('... 1 more item\n]'), true);
 check('Map', inspect(new Map([['a', 1]])), "Map(1) { 'a' => 1 }");

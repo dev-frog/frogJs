@@ -43,6 +43,7 @@ const kObjectType = 0;
 const kArrayType = 1;
 const kArrayExtrasType = 2;
 
+// eslint-disable-next-line no-control-regex
 const ansiPattern = /\u001b\[\d\d?m/g;
 const keyIdentifier = /^[a-zA-Z_][a-zA-Z_0-9]*$/;
 
@@ -282,7 +283,7 @@ function formatError(err, constructor, tag, ctx, keys) {
 function formatRaw(ctx, value, recurseTimes, typedArray) {
   let keys;
   const constructor = getConstructorName(value);
-  let tag = '';
+  let tag;
   try {
     tag = value[Symbol.toStringTag];
   } catch {
@@ -297,7 +298,7 @@ function formatRaw(ctx, value, recurseTimes, typedArray) {
   let formatter = getEmptyFormatArray;
   let braces;
   let noIterator = true;
-  let i = 0;
+  let i;
   let extrasType = kObjectType;
 
   if (Symbol.iterator in value || constructor === null) {
@@ -503,6 +504,7 @@ function formatBigInt(fn, bigint) {
   return fn(`${bigint}n`, 'bigint');
 }
 
+// eslint-disable-next-line no-control-regex
 const strEscapeSequencesRegExp = /[\x00-\x1f\x27\x5c\x7f-\x9f]/;
 const meta = [
   '\\x00', '\\x01', '\\x02', '\\x03', '\\x04', '\\x05', '\\x06', '\\x07',

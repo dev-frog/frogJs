@@ -24,3 +24,6 @@ src/**/*.o
 # Debug symbols
 *.dSYM/
 *.su
+
+# npm (TypeScript and ESLint for `make lint` / `make typecheck`)
+node_modules/

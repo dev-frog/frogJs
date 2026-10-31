@@ -4,7 +4,7 @@ console.log('=== Enhanced FS Tests ===');
 
 // Test 1: fs.mkdirSync and fs.existsSync
 console.log('\n--- mkdir and existsSync tests ---');
-fs.mkdirSync('testdir', 0755);
+fs.mkdirSync('testdir', 0o755);
 console.log('Created testdir');
 console.log('testdir exists:', fs.existsSync('testdir'));
 
@@ -38,7 +38,7 @@ console.log('testdir/test.txt exists:', fs.existsSync('testdir/test.txt'));
 
 // Test 6: fs.rmdirSync
 console.log('\n--- rmdirSync test ---');
-files2 = fs.readdirSync('testdir');
+const files2 = fs.readdirSync('testdir');
 console.log('Files before rmdir:', files2);
 fs.rmdirSync('testdir');
 console.log('Removed testdir');
@@ -48,7 +48,7 @@ console.log('testdir exists:', fs.existsSync('testdir'));
 console.log('\n--- Async operations test ---');
 
 // Async mkdir
-fs.mkdir('async-test-dir', 0755, (err) => {
+fs.mkdir('async-test-dir', 0o755, (err) => {
     if (err) {
         console.log('mkdir error:', err);
     } else {

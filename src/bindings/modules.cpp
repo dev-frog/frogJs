@@ -12,7 +12,7 @@
 using namespace v8;
 
 // Module cache: filepath -> exports object (per thread: each worker has its own)
-thread_local std::map<std::string, Persistent<Object>> moduleCache;
+thread_local std::map<std::string, Persistent<Value>> moduleCache;
 
 // Forget loaded modules (the REPL's .clear starts over with a fresh context)
 void ClearModuleCache() {
@@ -113,9 +113,13 @@ void Require(const FunctionCallbackInfo<Value>& args) {
         }
     }
 
-    // Get the caller's __dirname to resolve relative paths
-    Local<Value> dirnameVal = global->Get(context,
-        String::NewFromUtf8(isolate, "__dirname").ToLocalChecked()).ToLocalChecked();
+    // Relative paths resolve from the requiring module's directory: each
+    // module's require() carries it as its data; the main script's require()
+    // uses the global __dirname
+    Local<Value> dirnameVal = args.Data();
+    if (!dirnameVal->IsString()) {
+        dirnameVal = global->Get(context, String::NewFromUtf8(isolate, "__dirname").ToLocalChecked()).ToLocalChecked();
+    }
 
     std::string basePath = ".";
     if (dirnameVal->IsString()) {
@@ -136,7 +140,7 @@ void Require(const FunctionCallbackInfo<Value>& args) {
     // Check if module is already cached
     auto cached = moduleCache.find(filepath);
     if (cached != moduleCache.end()) {
-        args.GetReturnValue().Set(Local<Object>::New(isolate, cached->second));
+        args.GetReturnValue().Set(Local<Value>::New(isolate, cached->second));
         return;
     }
 
@@ -191,18 +195,14 @@ void Require(const FunctionCallbackInfo<Value>& args) {
     // Call the wrapper function with module context
     Local<Function> wrapperFn = Local<Function>::Cast(result);
 
-    // Get the require function
-    Local<Value> requireFn = global->Get(context,
-        String::NewFromUtf8(isolate, "require").ToLocalChecked()).ToLocalChecked();
+    // This module's require(), resolving relative to its directory
+    Local<String> moduleDirStr = String::NewFromUtf8(isolate, moduleDir.c_str()).ToLocalChecked();
+    Local<Value> requireFn =
+        FunctionTemplate::New(isolate, Require, moduleDirStr)->GetFunction(context).ToLocalChecked();
 
     // Prepare arguments: exports, require, module, __filename, __dirname
     Local<Value> argv[5] = {
-        exports,
-        requireFn,
-        module,
-        String::NewFromUtf8(isolate, filepath.c_str()).ToLocalChecked(),
-        String::NewFromUtf8(isolate, moduleDir.c_str()).ToLocalChecked()
-    };
+        exports, requireFn, module, String::NewFromUtf8(isolate, filepath.c_str()).ToLocalChecked(), moduleDirStr};
 
     // Execute the module
     if (!wrapperFn->Call(context, context->Global(), 5, argv).ToLocal(&result)) {
@@ -213,17 +213,10 @@ void Require(const FunctionCallbackInfo<Value>& args) {
     Local<Value> finalExports = module->Get(context,
         String::NewFromUtf8(isolate, "exports").ToLocalChecked()).ToLocalChecked();
 
-    if (!finalExports->IsObject()) {
-        isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate,
-            "Module exports must be an object").ToLocalChecked()));
-        return;
-    }
+    // Cache the module (exports can be any value, as in Node.js)
+    moduleCache[filepath].Reset(isolate, finalExports);
 
-    // Cache the module
-    Local<Object> exportsObj = Local<Object>::Cast(finalExports);
-    moduleCache[filepath].Reset(isolate, exportsObj);
-
-    args.GetReturnValue().Set(exportsObj);
+    args.GetReturnValue().Set(finalExports);
 }
 
 // Set up module system
@@ -255,4 +248,12 @@ void SetupModules(Isolate* isolate, Local<Context> context, const std::string& m
         String::NewFromUtf8(isolate, "__dirname").ToLocalChecked(),
         String::NewFromUtf8(isolate, mainDir.c_str()).ToLocalChecked()
     ).Check();
+
+    // The main script isn't wrapped like other modules, but gets their
+    // `module` and `exports` (CommonJS output of TypeScript assigns to them)
+    Local<Object> mainModule = Object::New(isolate);
+    Local<Object> mainExports = Object::New(isolate);
+    mainModule->Set(context, String::NewFromUtf8(isolate, "exports").ToLocalChecked(), mainExports).Check();
+    context->Global()->Set(context, String::NewFromUtf8(isolate, "module").ToLocalChecked(), mainModule).Check();
+    context->Global()->Set(context, String::NewFromUtf8(isolate, "exports").ToLocalChecked(), mainExports).Check();
 }

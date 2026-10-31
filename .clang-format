@@ -1,0 +1,24 @@
+# C++ formatting for FrogJS (see docs/style-guide.md). Run `make format` to
+# format the files you changed; existing code is not reformatted wholesale.
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++20
+IndentWidth: 4
+ContinuationIndentWidth: 4
+ColumnLimit: 120
+AccessModifierOffset: -3
+PointerAlignment: Left
+DerivePointerAlignment: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLoopsOnASingleLine: true
+AllowShortLambdasOnASingleLine: All
+AllowShortBlocksOnASingleLine: Never
+AlignAfterOpenBracket: DontAlign
+BinPackArguments: true
+BinPackParameters: true
+BreakConstructorInitializers: BeforeColon
+Cpp11BracedListStyle: true
+IncludeBlocks: Preserve
+SortIncludes: Never
+SpacesBeforeTrailingComments: 2

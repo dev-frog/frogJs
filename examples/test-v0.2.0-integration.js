@@ -26,7 +26,7 @@ console.log('Data matches:', readData === 'Hello, v0.2.0!');
 // ============================================
 console.log('\n--- Test 3: Enhanced FS + Process ---');
 const testDir = 'test-v0.2.0-dir';
-fs.mkdirSync(testDir, 0755);
+fs.mkdirSync(testDir, 0o755);
 console.log('Created directory:', testDir);
 console.log('Directory exists:', fs.existsSync(testDir));
 

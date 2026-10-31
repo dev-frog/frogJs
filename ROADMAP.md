@@ -1,6 +1,6 @@
 # FrogJS Development Roadmap
 
-## 📊 Current Status: Version 0.8.0
+## 📊 Current Status: Version 0.9.0
 
 ### ✅ Completed (v0.1.0)
 - Core V8 runtime integration
@@ -58,6 +58,14 @@
 - Worker threads module: `Worker` (file or `eval`), `isMainThread`, `parentPort`, `workerData`, `threadId`, `MessageChannel`, `MessagePort`, `receiveMessageOnPort`
 - Structured-clone message passing; `SharedArrayBuffer` + `Atomics` shared between threads; transferable `ArrayBuffer`s and `MessagePort`s
 - `process.stdout` / `process.stderr` streams; `util.promisify.custom`
+
+### ✅ Completed (v0.9.0)
+- TypeScript declarations for the globals and all 11 built-in modules (`types/`), with type tests and a runtime check (`make check-types`)
+- Linting: ESLint for the examples, tools and the JavaScript embedded in C++ (`make lint-js`); warning-free C++ under `-Werror` (`make lint-cpp`, CI builds with `WERROR=1`)
+- Formatting: `.clang-format`, `.editorconfig`, `make format` / `make format-check`, and a [style guide](docs/style-guide.md)
+- Rewritten [contributing guide](docs/contributing.md) and [architecture document](docs/architecture.md)
+- `make test` / `make check`, header dependency tracking, and CI running test + lint + type checks
+- Module fixes: nested `require()` resolves from the requiring module's directory; `module.exports` can be any value; the main script has `module`/`exports`
 
 ---
 
@@ -356,7 +364,7 @@ void SetupCrypto(Isolate* isolate, Local<Context> context);
 
 ---
 
-### Version 0.9.0 - TypeScript & Tooling
+### Version 0.9.0 - TypeScript & Tooling ✅ Completed
 
 **Priority: LOW**
 **Estimated Effort: 2-3 weeks**
@@ -375,6 +383,27 @@ declare module 'http' { ... }
 - Formatting guidelines
 - Contributing guidelines
 - Architecture documentation
+
+**Implementation Notes:**
+- `types/*.d.ts` describe FrogJS rather than Node.js. Where they differ, the declarations follow FrogJS:
+  - `fs` errors are strings, contents are strings, and `Stats.isFile`/`isDirectory` are booleans.
+  - Buffers aren't indexable.
+  - `net` sockets aren't streams.
+  - `setTimeout` requires a delay.
+  - `process` isn't an EventEmitter.
+- The declarations are checked three ways:
+  - `types/test/usage.ts` compiles under `--strict`, is compiled to JavaScript and runs in FrogJS (31 runtime checks).
+  - `types/test/errors.ts` lists 13 mistakes that must not compile.
+  - `tools/check-types.js` reads the declarations with the TypeScript compiler API and verifies, in a running FrogJS, that every declared export and class method exists. There are no undeclared exports.
+- The ESLint config has a processor that lints each `R"JS(...)JS"` block in `src/*.cpp` in place, with errors at their `.cpp` line. Turning it on found an undefined variable in `examples/test-fs-enhanced.js`, plus dead assignments and needless escapes in `http`, `stream` and `util`.
+- The C++ is warning-free under `-Wall -Wextra`. Results ignored on purpose are marked with `(void)` and a comment.
+- `.clang-format` is Google style with 4 spaces and 120 columns. Existing code isn't reformatted wholesale: `make format` (`git clang-format`) formats only the lines that differ from `main`.
+- Writing the tests found two module bugs, now fixed:
+  - `require('./x')` inside a module in a subdirectory resolved from the main script's directory.
+  - `module.exports` had to be an object.
+  - The main script also gained `module`/`exports`, so TypeScript's CommonJS output runs as the entry point.
+- Dev dependencies (`package.json`): `typescript` 5.9 (for its compiler API; TypeScript 7 doesn't have one), `eslint` 10, `@eslint/js`, `globals`
+- Not included: clang-tidy (no compile database yet), publishing the declarations to npm, a CMake build that matches the Makefile
 
 ---
 
@@ -447,8 +476,8 @@ declare module 'http' { ... }
 - **v0.6.0**: ✅ Done
 - **v0.7.0**: ✅ Done
 - **v0.8.0**: ✅ Done
-- **v0.9.0**: 2-3 weeks (recommended immediate focus)
-- **v1.0.0**: 4-6 weeks
+- **v0.9.0**: ✅ Done
+- **v1.0.0**: 4-6 weeks (recommended immediate focus)
 
 **Total to v1.0.0**: ~6-9 months
 
@@ -456,7 +485,7 @@ declare module 'http' { ... }
 
 ## 🚀 Quick Start Recommendation
 
-Next up is **v0.9.0** (TypeScript & Tooling). Smaller follow-ups that build on earlier versions:
+Next up is **v1.0.0** (Stable Release): memory leaks first (Buffers), then test coverage and API stability. Smaller follow-ups that build on earlier versions:
 - `fs.createReadStream` / `fs.createWriteStream` on top of `stream.Readable`/`Writable`
 - Make `net` sockets `Duplex` streams so `socket.write()` reports backpressure (HTTP responses would inherit it)
 - Top-level `await` in the REPL; report unhandled promise rejections
@@ -466,10 +495,13 @@ Next up is **v0.9.0** (TypeScript & Tooling). Smaller follow-ups that build on e
 - `process.stdin` as a Readable stream, `process.nextTick`, `queueMicrotask`, `structuredClone` (the worker serializer can back it)
 - `child_process.fork()` with an IPC channel
 - Wrap the main script like a module (top-level `return`, absolute stack-trace paths)
+- `node_modules` package resolution; circular `require()` returning partial exports
+- Reformat the older C++ files with clang-format (one commit per file), then enforce `make format-check` in CI; add clang-tidy with a generated `compile_commands.json`
+- `fs` errors as `Error` objects with `code` (the declarations will need updating with it)
 
 ```bash
 # Create implementation branch
-git checkout -b feature/typescript-definitions
+git checkout -b fix/buffer-memory
 
 # Focus on one feature at a time
 # Test thoroughly with examples

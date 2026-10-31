@@ -25,6 +25,7 @@
 - **Crypto**: Node-compatible hashes and HMAC (md5, sha1, sha2), PBKDF2, secure random bytes/UUIDs, `timingSafeEqual`, with no OpenSSL dependency
 - **Child Processes**: `spawn`/`exec`/`execFile` with stdio streams, and `execSync`/`spawnSync`/`execFileSync`
 - **Worker Threads**: `Worker`s on their own threads, structured-clone message passing, `MessageChannel`, `SharedArrayBuffer` + `Atomics`
+- **TypeScript Definitions**: `types/` declares every global and built-in module, checked against the runtime
 - **Clean Architecture**: Minimal C++ codebase with clear separation of concerns
 
 ---
@@ -109,7 +110,7 @@ Run it:
 Run `frogjs` with no script to start an interactive shell:
 ```
 $ ./build/frogjs
-Welcome to FrogJS v0.8.0.
+Welcome to FrogJS v0.9.0.
 Type ".help" for more information.
 > const server = { port: 3000, routes: ['/', '/api'] }
 undefined
@@ -136,7 +137,7 @@ frogjs -p "os.cpus().length"      # evaluate and print the result
 frogjs -c script.js               # syntax check only
 frogjs -i -e "var x = 1"          # run code, then start the REPL
 echo "console.log('hi')" | frogjs # read the script from stdin
-frogjs --version                  # v0.8.0
+frogjs --version                  # v0.9.0
 frogjs --help                     # all options
 ```
 
@@ -298,6 +299,21 @@ const math = require('./math');
 console.log(math.add(1, 2)); // 3
 ```
 
+### TypeScript
+`types/` holds declarations for the FrogJS globals and built-in modules. They describe FrogJS's actual behavior where it differs from Node.js. Compile to CommonJS and run the output:
+
+```typescript
+// tsconfig.json: { "compilerOptions": { "module": "CommonJS", "lib": ["ES2022"], "types": [], "strict": true },
+//                  "include": ["src", "path/to/frogjs/types/index.d.ts"] }
+import fs = require('fs');
+import { execSync } from 'child_process';
+
+const branch: string = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
+fs.writeFileSync('branch.txt', branch);
+```
+
+See [types/README.md](types/README.md).
+
 ---
 
 ## Examples
@@ -315,6 +331,7 @@ Check out the `examples/` directory for more samples:
 - `examples/tcp-server.js` - TCP server implementation
 - `examples/tcp-client.js` - TCP client implementation
 - `examples/modules/` - Module system examples
+- `examples/test-modules.js` - Module system self-test
 - `examples/test-path.js` - Path module usage
 - `examples/test-os.js` - OS module usage
 - `examples/test-util.js` - Util module self-test (`inspect`, `format`)
@@ -363,10 +380,15 @@ frogjs/
 │       ├── errors.cpp       # Node-style uncaught error reports
 │       ├── encoding.cpp     # hex/base64/latin1/... for Buffer and crypto
 │       └── hash.cpp         # MD5, SHA-1, SHA-2, HMAC, PBKDF2
-├── examples/                # Example scripts
-├── docs/                    # Documentation
-├── include/frogjs/          # Shared headers (V8 compat, Buffer, JS module loader)
-├── Makefile                 # Build configuration
+├── examples/                # Example scripts and self-tests (test-*.js)
+├── docs/                    # API reference, architecture, contributing and style guides
+├── include/frogjs/          # Shared headers (runtime, loop, workers, V8 compat, Buffer, ...)
+├── types/                   # TypeScript declarations (index.d.ts) and their tests
+├── tools/                   # Development scripts (check-types.js)
+├── Makefile                 # Build, test, lint, format and type-check targets
+├── package.json             # Dev tools: ESLint and TypeScript
+├── eslint.config.js         # ESLint, including the JavaScript embedded in src/
+├── .clang-format            # C++ formatting
 ├── CMakeLists.txt          # CMake build (in development)
 ├── README.md               # This file
 ├── FEATURES.md             # Detailed feature list
@@ -400,12 +422,13 @@ frogjs/
 - Additional FS operations (mkdir, rmdir, stat, readdir, unlink, existsSync)
 - Path module (join, resolve, normalize, dirname, basename, extname, isAbsolute)
 - OS module (platform, arch, cpus, hostname, release, type, totalmem, freemem, homedir, tmpdir)
+- TypeScript declarations for every built-in module (`types/`)
+- Tooling: `make test`, `make lint` (ESLint + `-Werror`), `make format` (clang-format), `make check-types`
 - Automated release builds via GitHub Actions
 
 ### Planned
 - File streams (fs.createReadStream / fs.createWriteStream)
-- Child processes
-- Worker threads
+- Packages (`node_modules`) and ES modules
 - Windows support
 
 ---
@@ -413,6 +436,11 @@ frogjs/
 ## Documentation
 
 - **[FEATURES.md](FEATURES.md)** - Comprehensive feature documentation
+- **[docs/api-reference.md](docs/api-reference.md)** - API reference
+- **[docs/architecture.md](docs/architecture.md)** - How the runtime works
+- **[docs/contributing.md](docs/contributing.md)** - Contributing guide: setup, checks, tests
+- **[docs/style-guide.md](docs/style-guide.md)** - Formatting and coding conventions
+- **[types/README.md](types/README.md)** - Using the TypeScript declarations
 - **[note.md](note.md)** - Development guide and implementation notes
 - **[steps.md](steps.md)** - Step-by-step implementation guide
 - **[RELEASE_GUIDE.md](RELEASE_GUIDE.md)** - How to cut a release
@@ -473,14 +501,15 @@ See [RELEASE_GUIDE.md](RELEASE_GUIDE.md) for details.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
+Contributions are welcome! See the [contributing guide](docs/contributing.md) and the [style guide](docs/style-guide.md).
 
 ### Development Setup
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly with the examples
-5. Submit a pull request
+```bash
+make            # build
+npm install     # ESLint and TypeScript
+make check      # lint + tests + type checks (what CI runs)
+make format     # clang-format the C++ you changed
+```
 
 ---
 
@@ -498,7 +527,7 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Version**: 0.8.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
+**Version**: 0.9.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
 **Status**: Active Development
 **Last Updated**: 2026-10-16
 

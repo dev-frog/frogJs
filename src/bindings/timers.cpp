@@ -33,7 +33,7 @@ void TimerCallback(uv_timer_t* handle) {
 
     // Call the JavaScript function
     TryCatch try_catch(isolate);
-    callback->Call(context, context->Global(), 0, nullptr);
+    (void)callback->Call(context, context->Global(), 0, nullptr);  // a throw is reported below
 
     if (try_catch.HasCaught()) {
         frogjs::ReportException(isolate, &try_catch);

@@ -44,23 +44,27 @@ jobs:
         grep "V8_PATH" Makefile
         grep "LIBUV_PATH" Makefile
 
-        # Build
+        # Build (warnings are errors)
         make clean || true
-        make all
+        make all WERROR=1
 
-    - name: Test basic functionality
-      if: success()
-      run: |
-        echo "Testing FrogJS basic functionality..."
-        ./build/frogjs examples/hello.js
-        ./build/frogjs examples/test-http.js
-        ./build/frogjs examples/test-events.js
-        ./build/frogjs examples/test-streams.js
-        ./build/frogjs examples/test-util.js
-        ./build/frogjs examples/test-crypto.js
-        ./build/frogjs examples/test-child-process.js
-        ./build/frogjs examples/test-worker-threads.js
-        ./examples/test-cli.sh ./build/frogjs
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+
+    - name: Install lint and type-check tools
+      run: npm ci
+
+    - name: Test
+      run: make test
+
+    - name: Lint
+      run: make lint
+
+    - name: Check TypeScript declarations
+      run: make check-types
 
     - name: Upload build artifact
       if: success()

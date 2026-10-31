@@ -53,10 +53,11 @@ FrogJS is a lightweight JavaScript runtime built on V8 and libuv, providing Node
 ### 6. Module System
 - **CommonJS Support**: `require()` and `module.exports`
 - **Module Caching**: Modules loaded once per session
-- **Relative Paths**: Support for `./` and `../` imports
+- **Relative Paths**: Support for `./` and `../` imports, resolved from the requiring module's directory
+- **Any Export**: `module.exports` can be any value; the main script has `module`/`exports` too
 - **Index Files**: Automatic `index.js` resolution
 - **File Extension Resolution**: `.js` extension auto-detection
-- **Built-in Modules**: `require('fs')`, `require('net')`, `require('http')`, `require('path')`, `require('os')`, `require('events')`, `require('stream')`
+- **Built-in Modules**: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`, `child_process`, `worker_threads`
 
 ### 7. Path API
 POSIX path utilities matching Node.js `path.posix` (available as global `path` or `require('path')`)
@@ -190,6 +191,26 @@ Node.js-style streams (`require('stream')`, also the global `stream`)
   - The event loop keeps running between prompts
 - Options: `-e/--eval`, `-p/--print`, `-c/--check`, `-i/--interactive`, `-v/--version`, `-h/--help`, `-` (script from stdin), `--`
 - Invalid options exit with code 9; uncaught errors in the main script exit with code 1
+
+### 18. TypeScript Declarations
+`types/index.d.ts` declares the globals (`process`, `Buffer`, timers, `require`, ...) and every built-in module. See [types/README.md](types/README.md).
+- They follow FrogJS where it differs from Node.js, so the compiler rejects code that would fail at run time:
+  - `fs` errors are strings and `Stats.isFile` is a boolean.
+  - Buffers can't be indexed.
+  - Sockets are not streams.
+  - `setTimeout` needs a delay.
+- They are checked three ways:
+  - `types/test/usage.ts` type-checks under `--strict`, and runs in FrogJS after compiling.
+  - `types/test/errors.ts` must be rejected.
+  - `tools/check-types.js` finds declared exports and methods that are missing at run time.
+
+### 19. Development Tooling
+- `make test`: every self-test plus the CLI test
+- `make lint`: ESLint (`eslint.config.js`) on the examples, the tools and the JavaScript embedded in `src/*.cpp` (reported at its `.cpp` line), and every C++ file compiled with `-Werror`
+- `make format` / `make format-check`: clang-format (`.clang-format`) on the C++ lines changed since `main` (`git clang-format`)
+- `make check-types`: the TypeScript checks above
+- `make check`: all of it, as CI runs it (CI also builds with `make WERROR=1`)
+- `.editorconfig`; header dependency tracking in the Makefile; [contributing guide](docs/contributing.md) and [style guide](docs/style-guide.md)
 
 ## 📖 Usage Examples
 
@@ -392,6 +413,7 @@ console.log('Home:', os.homedir());
 - Child processes (spawn, exec, execSync, stdio streams)
 - Worker threads (message passing, SharedArrayBuffer)
 - REPL and command-line options
+- TypeScript declarations and development tooling (lint, format, type checks)
 
 ### In Progress 🔨
 - None currently
@@ -399,8 +421,7 @@ console.log('Home:', os.homedir());
 ### Planned Features ⏳
 - `fs.createReadStream` / `fs.createWriteStream`
 - `child_process.fork()` with IPC
-- Native ESM support (import/export)
-- TypeScript definitions
+- Packages (`node_modules`) and native ESM support (import/export)
 
 ## 🧪 Testing
 
@@ -426,6 +447,7 @@ Run example scripts to test features:
 ./build/frogjs examples/tcp-client.js
 
 # Modules
+./build/frogjs examples/test-modules.js
 ./build/frogjs examples/modules/main.js
 
 # Path & OS
@@ -438,6 +460,9 @@ Run example scripts to test features:
 ./build/frogjs examples/test-child-process.js
 ./build/frogjs examples/test-worker-threads.js
 ./examples/test-cli.sh
+
+# Or all of them, plus lint and type checks
+make check
 ```
 
 ## 📊 Performance
@@ -471,4 +496,4 @@ FrogJS aims for CommonJS compatibility but is not fully Node.js compatible. Focu
 ---
 
 **Last Updated**: 2026-10-31
-**Version**: 0.8.0 (Development)
+**Version**: 0.9.0 (Development)

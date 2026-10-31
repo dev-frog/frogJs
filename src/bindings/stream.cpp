@@ -449,9 +449,8 @@ Readable.prototype.read = function read(n) {
   // Refill if below the high water mark after this read
   let doRead = state.needReadable;
   if (state.length === 0 || state.length - n < state.highWaterMark) doRead = true;
-  if (state.ended || state.reading || state.destroyed || state.errored) {
-    doRead = false;
-  } else if (doRead) {
+  if (state.ended || state.reading || state.destroyed || state.errored) doRead = false;
+  if (doRead) {
     state.reading = true;
     state.sync = true;
     if (state.length === 0) state.needReadable = true;
@@ -465,7 +464,7 @@ Readable.prototype.read = function read(n) {
     if (!state.reading) n = howMuchToRead(nOrig, state);
   }
 
-  let ret = n > 0 ? fromList(n, state) : null;
+  const ret = n > 0 ? fromList(n, state) : null;
   if (ret === null) {
     state.needReadable = state.length <= state.highWaterMark;
     n = 0;

@@ -211,7 +211,7 @@ class HTTPParser {
     if (this.running) return;
     this.running = true;
     try {
-      while (!this.paused && this._step()) {}
+      while (!this.paused && this._step()) { /* each step handles one queued event */ }
     } finally {
       this.running = false;
     }
@@ -734,7 +734,6 @@ class Server extends ProtocolEmitter {
     if (args[0] !== null && typeof args[0] === 'object') {
       port = args[0].port || 0;
       host = args[0].host;
-      i = 1;
     } else {
       if (typeof args[0] === 'number' || (typeof args[0] === 'string' && /^\d+$/.test(args[0]))) {
         port = Number(args[0]);
@@ -1185,7 +1184,7 @@ class ClientRequest extends OutgoingMessage {
 
 // Split an http:// URL into request options
 function parseURL(input) {
-  const match = /^([a-zA-Z][a-zA-Z0-9+.-]*:)\/\/(?:[^@\/?#]*@)?(\[[^\]]*\]|[^:\/?#]*)(?::(\d*))?([^#]*)/.exec(input.trim());
+  const match = /^([a-zA-Z][a-zA-Z0-9+.-]*:)\/\/(?:[^@/?#]*@)?(\[[^\]]*\]|[^:/?#]*)(?::(\d*))?([^#]*)/.exec(input.trim());
   if (!match || !match[2]) throw httpError(`Invalid URL: ${input}`, 'ERR_INVALID_URL');
   let path = match[4] || '/';
   if (path[0] === '?') path = '/' + path;

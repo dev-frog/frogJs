@@ -36,7 +36,7 @@ frogjs                                     # start the REPL
 | `-p`, `--print <script>` | Evaluate `script` and print the result like `console.log` would |
 | `-c`, `--check` | Compile the script (or stdin) without running it; exit code 1 on a syntax error |
 | `-i`, `--interactive` | Start the REPL even if stdin is not a terminal, after running the script or `--eval` code |
-| `-v`, `--version` | Print the version (`v0.8.0`) |
+| `-v`, `--version` | Print the version (`v0.9.0`) |
 | `-h`, `--help` | Print usage |
 | `-` | Read the script from stdin (the default when no script is given and stdin is not a terminal) |
 | `--` | End of options: the next argument is the script |
@@ -1090,7 +1090,7 @@ Load modules.
 
 **Module Resolution:**
 1. Built-in modules: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`, `child_process`, `worker_threads`
-2. Relative paths (`./`, `../`)
+2. Relative paths (`./`, `../`), resolved from the directory of the module that calls `require()`
 3. Absolute paths
 4. Auto-append `.js` extension
 5. Auto-append `/index.js` for directories
@@ -1107,7 +1107,7 @@ const nested = require('../parent/module');
 ```
 
 ### `module.exports`
-Export values from module.
+Export values from module. Any value can be exported. The main script has `module` and `exports` too (so TypeScript's CommonJS output runs as the entry point), but nothing can `require()` it.
 
 ```javascript
 // Export object

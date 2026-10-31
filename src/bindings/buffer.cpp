@@ -506,7 +506,7 @@ void ByteStringToBuffer(const FunctionCallbackInfo<Value>& args) {
 }
 
 // Buffer finalizer - cleanup data when buffer is garbage collected
-void BufferFinalizer(const WeakCallbackInfo<Object>& data) {
+void BufferFinalizer(const WeakCallbackInfo<Object>& /*data*/) {
     // This would be called when buffer is garbage collected
     // For simplicity, we're relying on explicit cleanup for now
     // In production, you'd want proper weak callback handling

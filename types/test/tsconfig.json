@@ -1,0 +1,16 @@
+{
+  // `npm run typecheck`: the declarations must accept usage.ts and reject
+  // every line marked @ts-expect-error in errors.ts. usage.ts is also compiled
+  // to build/types-test and run by `make check-types`.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "lib": ["ES2022"],
+    "types": [],
+    "strict": true,
+    "noUnusedLocals": true,
+    "outDir": "../../build/types-test",
+    "rootDir": "."
+  },
+  "files": ["../index.d.ts", "usage.ts", "errors.ts"]
+}

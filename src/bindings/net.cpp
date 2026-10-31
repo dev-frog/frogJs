@@ -198,7 +198,7 @@ static void SetPeerInfo(Isolate* isolate, Local<Object> socket, ConnectionData* 
 }
 
 // Allocate buffer for reading
-void AllocBuffer(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
+void AllocBuffer(uv_handle_t* /*handle*/, size_t suggested_size, uv_buf_t* buf) {
     buf->base = new char[suggested_size];
     buf->len = suggested_size;
 }
@@ -451,7 +451,7 @@ void OnConnection(uv_stream_t* server, int status) {
         Local<Value> argv[1] = { socket };
 
         TryCatch try_catch(isolate);
-        callback->Call(context, context->Global(), 1, argv);
+        (void)callback->Call(context, context->Global(), 1, argv);  // a throw is reported below
 
         if (try_catch.HasCaught()) {
             ReportException(isolate, try_catch);

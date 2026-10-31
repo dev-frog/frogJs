@@ -1,335 +1,106 @@
 # Contributing to FrogJS
 
-Thank you for your interest in contributing to FrogJS! This document provides guidelines and instructions for contributing to the project.
+Thanks for helping! This guide covers setting up, the checks every change has to pass, and how to add to the runtime. How the code is written is in the [style guide](style-guide.md); how the runtime fits together is in the [architecture document](architecture.md).
 
 ## Table of Contents
 - [Code of Conduct](#code-of-conduct)
-- [Getting Started](#getting-started)
+- [Setting Up](#setting-up)
 - [Development Workflow](#development-workflow)
-- [Coding Standards](#coding-standards)
-- [Testing Guidelines](#testing-guidelines)
-- [Documentation Standards](#documentation-standards)
-- [Pull Request Process](#pull-request-process)
+- [Checks](#checks)
+- [Tests](#tests)
+- [Adding to FrogJS](#adding-to-frogjs)
+- [Pull Requests](#pull-requests)
 
 ## Code of Conduct
 
-- Be respectful and inclusive
-- Provide constructive feedback
-- Focus on what is best for the community
-- Show empathy towards other community members
+Be respectful and constructive, assume good intent, and focus on what's best for the project and the people using it.
 
-## Getting Started
+## Setting Up
 
-### Prerequisites
+You need:
+- A C++20 compiler (Clang or GCC)
+- V8 and libuv
+- Node.js 20+ and npm, for the linters, the TypeScript checks, and comparing behavior with Node.js
+- Optional: clang-format, for `make format`
 
-Before contributing, ensure you have:
-- C++17 compatible compiler (GCC, Clang, or MSVC)
-- V8 JavaScript Engine installed
-- libuv library installed
-- Git for version control
-- Basic understanding of V8 and libuv APIs
+```bash
+# macOS
+brew install v8 libuv node clang-format
 
-### Setting Up Development Environment
+git clone https://github.com/dev-frog/frogJs.git
+cd frogJs
+make            # build/frogjs
+npm install     # ESLint and TypeScript (make lint / make check-types run it if needed)
+make check      # lint, tests and type checks: everything CI runs
+```
 
-1. **Fork and clone the repository:**
-   ```bash
-   git clone https://github.com/your-username/frogjs.git
-   cd frogjs
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   # macOS
-   brew install v8 libuv
-
-   # Linux (Ubuntu/Debian)
-   sudo apt-get install libuv1-dev build-essential
-   # V8 requires manual installation or custom package
-   ```
-
-3. **Build the project:**
-   ```bash
-   make clean
-   make
-   ```
-
-4. **Test your build:**
-   ```bash
-   ./build/frogjs examples/hello.js
-   ```
+The Makefile points at Homebrew's V8 and libuv. Elsewhere, pass the install prefixes: `make V8_PATH=/usr/local LIBUV_PATH=/usr`. The V8 sandbox defines are detected from the library. The build is unoptimized (`-O0`) except for the hash functions; the compiler records header dependencies, so `make` rebuilds what a changed header affects.
 
 ## Development Workflow
 
-### 1. Choose an Issue
-- Check [Issues](https://github.com/your-username/frogjs/issues) for open tasks
-- Look for tags like `good first issue` for beginners
-- Comment on the issue to claim it
+1. Find or open an issue, and say you're working on it.
+2. Branch from `main`: `git checkout -b feature/short-name` (or `fix/...`, `docs/...`).
+3. Make the change, with its test and documentation (see [Adding to FrogJS](#adding-to-frogjs)).
+4. Run `make check`, and `make format` to format the C++ lines you changed.
+5. Commit with a [conventional commit](style-guide.md#commits) message and open a pull request.
 
-### 2. Create a Branch
+## Checks
+
+| Command | What it checks |
+|---------|----------------|
+| `make test` | Every self-test in `examples/` (see [Tests](#tests)) and `examples/test-cli.sh` |
+| `make lint` | ESLint on the examples, the tools and the JavaScript embedded in `src/`; every C++ file compiled with `-Werror` |
+| `make check-types` | `types/test` type-checks under `--strict` (and rejects the mistakes in `types/test/errors.ts`); the compiled test runs in FrogJS; `tools/check-types.js` finds declarations that don't exist at run time |
+| `make format-check` | clang-format on the C++ lines changed since `main` (`make format` fixes them) |
+| `make check` | lint + test + check-types: what CI runs |
+
+CI (`.github/workflows/build.yml`) builds with `make WERROR=1` on macOS, then runs `make check`.
+
+## Tests
+
+The tests are FrogJS scripts that check themselves: `examples/test-*.js` print a line per check and exit with code 1 if one fails. `make test` runs them.
+
+Where FrogJS implements a Node.js API, **the same test file must pass under Node.js** too: that is how expected values, error messages and event orders are verified. (`test-http.js` is the exception: it also checks FrogJS-specific behavior, such as answering `500` when a handler throws.)
+
 ```bash
-git checkout -b feature/your-feature-name
-# or
-git checkout -b fix/your-bug-fix
+./build/frogjs examples/test-child-process.js
+node examples/test-child-process.js     # must agree
 ```
 
-### 3. Make Your Changes
-- Write clean, well-documented code
-- Follow coding standards (see below)
-- Test your changes thoroughly
-- Update documentation if needed
+A new test goes in `examples/test-<area>.js` with the `check(name, actual, expected)` helper of the existing ones. Add it to `TESTS` in the Makefile, to the list in `.github/workflows/build.yml`, and to the examples list in `README.md`. Test the edges and the failures too: wrong argument types, error codes, empty input, and what happens after close or exit.
 
-### 4. Test Your Changes
-```bash
-# Build
-make clean && make
+Changes to native code that manages memory or threads deserve a run under AddressSanitizer: build a copy with `-g -fsanitize=address -fno-omit-frame-pointer` added to `CXXFLAGS` and to the link line, then run the tests with `ASAN_OPTIONS=detect_leaks=0`.
 
-# Test with examples
-./build/frogjs examples/hello.js
-./build/frogjs examples/timers.js
-./build/frogjs examples/tcp-server.js
-```
+## Adding to FrogJS
 
-### 5. Commit Your Changes
-```bash
-git add .
-git commit -m "feat: add TCP client support"
-```
+### A function in an existing module
 
-### 6. Push and Create Pull Request
-```bash
-git push origin feature/your-feature-name
-# Then create PR on GitHub
-```
+1. Implement it: in the module's embedded JavaScript if it can be written in JavaScript, with a native helper in the same `.cpp` file for what can't.
+2. Match Node.js: same arguments, defaults, return value, error classes, codes and messages.
+3. Add checks to the module's self-test; run it under FrogJS and Node.js.
+4. Declare it in `types/<module>.d.ts` and use it in `types/test/usage.ts`.
+5. Document it in `docs/api-reference.md` and `FEATURES.md`.
 
-## Coding Standards
+### A new built-in module
 
-### C++ Code Style
+1. Create `src/bindings/<name>.cpp` with `void Setup<Name>(Isolate*, Local<Context>)`. It runs the embedded JavaScript with `frogjs::RunJsModule()` and sets the result as the global `<name>`. Modules it needs (`events`, `stream`, ...) are read from the global object and passed in.
+2. Add the file to `SRCS` in the Makefile, declare and call `Setup<Name>` in `src/core/runtime.cpp` (after the modules it depends on), and add the name to `builtinModules` in `src/bindings/modules.cpp`.
+3. Keep per-isolate state `thread_local` and use `frogjs::Loop()` so the module works in workers (see [architecture](architecture.md#threads)).
+4. Add `examples/test-<name>.js`, `types/<name>.d.ts` (referenced from `types/index.d.ts`, plus its global in `types/globals.d.ts` and `eslint.config.js`), and the documentation.
 
-#### Naming Conventions
-- **Classes**: `PascalCase` (e.g., `ConnectionData`)
-- **Functions**: `PascalCase` (e.g., `CreateServer`)
-- **Variables**: `camelCase` (e.g., `serverData`)
-- **Constants**: `UPPER_SNAKE_CASE` (e.g., `MAX_BUFFER_SIZE`)
-- **Private members**: trailing underscore (e.g., `privateVar_`)
+### Versions
 
-#### File Organization
-```cpp
-// 1. Includes
-#include <v8.h>
-#include <uv.h>
-#include <string>
+`include/frogjs/version.h` holds the version shown by `process.version` and `--version`, and `package.json` holds the same version. A finished roadmap version also updates `ROADMAP.md`, and the version strings in `README.md`, `FEATURES.md` and `docs/api-reference.md`.
 
-// 2. Using declarations
-using namespace v8;
+## Pull Requests
 
-// 3. Structs/Classes
-struct MyData {
-    // members
-};
+- **Title**: a conventional commit subject (`feat(http): support trailers`).
+- **Description**: what changed and why, how you tested it (and that Node.js agrees, where that applies), and anything that behaves differently from before.
+- **Checks**: CI must pass. A maintainer reviews; please address comments with new commits, and squash them if asked.
+- **Scope**: one change per pull request. Formatting changes to code you didn't otherwise touch go in a separate PR.
 
-// 4. Helper functions
-std::string HelperFunction() {
-    // implementation
-}
+## Questions
 
-// 5. Callback functions
-void Callback(uv_handle_t* handle) {
-    // implementation
-}
+Open a GitHub issue for bugs and feature requests, and a discussion for questions. Contributors are listed in [CONTRIBUTORS.md](../CONTRIBUTORS.md).
 
-// 6. Binding functions
-void BindingFunction(const FunctionCallbackInfo<Value>& args) {
-    // implementation
-}
-
-// 7. Setup functions
-void SetupModule(Isolate* isolate, Local<Context> context) {
-    // implementation
-}
-```
-
-#### Memory Management
-```cpp
-// Always use HandleScope for V8 objects
-void MyFunction(const FunctionCallbackInfo<Value>& args) {
-    Isolate* isolate = args.GetIsolate();
-    HandleScope handle_scope(isolate);
-
-    // Local handles are managed automatically
-    Local<String> str = String::NewFromUtf8(isolate, "text").ToLocalChecked();
-
-    // Persistent handles must be explicitly reset
-    Persistent<Function> callback;
-    callback.Reset(isolate, func);
-    // ... use callback ...
-    callback.Reset(); // Cleanup
-}
-```
-
-#### Error Handling
-```cpp
-// Always use TryCatch for V8 operations
-TryCatch try_catch(isolate);
-Local<Script> script;
-if (!Script::Compile(context, source).ToLocal(&script)) {
-    String::Utf8Value error(isolate, try_catch.Exception());
-    fprintf(stderr, "Error: %s\n", *error);
-    return;
-}
-
-// Convert C++ errors to JS exceptions
-if (error_condition) {
-    isolate->ThrowException(
-        String::NewFromUtf8(isolate, "Error message").ToLocalChecked()
-    );
-    return;
-}
-```
-
-### JavaScript Code Style
-
-#### Naming Conventions
-- **Variables/Functions**: `camelCase`
-- **Classes**: `PascalCase`
-- **Constants**: `UPPER_SNAKE_CASE`
-- **Private members**: leading underscore (e.g., `_privateVar`)
-
-#### Module Exports
-```javascript
-// Prefer named exports
-module.exports = {
-    myFunction,
-    myClass
-};
-
-// Single export
-module.exports = MyClass;
-```
-
-## Testing Guidelines
-
-### Unit Tests (Future)
-- Write tests for new functionality
-- Use descriptive test names
-- Test both success and failure cases
-- Mock external dependencies when needed
-
-### Integration Tests
-- Test complete workflows
-- Use example scripts for integration testing
-- Test error conditions
-- Verify memory management (no leaks)
-
-### Performance Tests
-- Benchmark new features
-- Compare against baseline
-- Profile memory usage
-- Test under load
-
-## Documentation Standards
-
-### Code Comments
-```cpp
-/**
- * Brief description of function
- *
- * Detailed description if needed
- *
- * @param args V8 function arguments
- * @return Description of return value
- */
-void MyFunction(const FunctionCallbackInfo<Value>& args) {
-    // Implementation
-}
-```
-
-### API Documentation
-- Update `docs/api-reference.md` for new APIs
-- Include examples
-- Document parameters and return values
-- Note any breaking changes
-
-### Architecture Documentation
-- Update `docs/architecture.md` for architectural changes
-- Include diagrams for complex systems
-- Explain design decisions
-- Document trade-offs
-
-### README Updates
-- Update README.md for user-visible changes
-- Update FEATURES.md for new features
-- Keep installation instructions current
-- Update examples directory
-
-## Pull Request Process
-
-### PR Title Format
-Use conventional commit format:
-- `feat:` - New feature
-- `fix:` - Bug fix
-- `docs:` - Documentation changes
-- `refactor:` - Code refactoring
-- `test:` - Adding or updating tests
-- `chore:` - Maintenance tasks
-
-### PR Description
-Include:
-- **Summary**: What changes were made and why
-- **Testing**: How you tested your changes
-- **Breaking Changes**: Any breaking changes (if applicable)
-- **Documentation**: Links to updated documentation
-
-### PR Review Process
-1. Automated checks must pass
-2. At least one maintainer approval required
-3. Address review comments
-4. Squash commits if requested
-5. Maintain approval after changes
-
-### Merge Criteria
-- Code follows coding standards
-- Tests pass (when tests are implemented)
-- Documentation is updated
-- No regressions in existing functionality
-- At least one maintainer approval
-
-## Development Areas
-
-### High Priority Areas
-1. **Error Handling**: Improve error messages and recovery
-2. **Memory Management**: Fix memory leaks in module cache
-3. **Testing**: Implement test suite
-4. **Documentation**: Complete API reference
-
-### Medium Priority Areas
-1. **Features**: Add process object, Buffer class
-2. **File System**: Add more FS operations
-3. **HTTP Module**: Implement HTTP on top of TCP
-4. **Build System**: Improve CMake support
-
-### Low Priority Areas
-1. **REPL Mode**: Interactive JavaScript shell
-2. **Worker Threads**: Multi-threaded JavaScript
-3. **ES Modules**: Native import/export support
-4. **TypeScript**: Type definitions
-
-## Questions and Support
-
-- **GitHub Issues**: For bug reports and feature requests
-- **Discussions**: For questions and community discussion
-- **Documentation**: Check existing docs first
-
-## Recognition
-
-Contributors will be:
-- Listed in CONTRIBUTORS.md
-- Mentioned in release notes
-- Credited in significant features
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the MIT License.
-
----
-
-Thank you for contributing to FrogJS! Every contribution helps make the project better.
+By contributing you agree that your contributions are licensed under the MIT License.
