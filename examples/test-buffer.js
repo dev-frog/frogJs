@@ -15,6 +15,9 @@ run(() => {
   throws('alloc(NaN)', () => Buffer.alloc(NaN), { name: 'RangeError', code: 'ERR_OUT_OF_RANGE' });
   throws('alloc(1e18)', () => Buffer.alloc(1e18), { name: 'RangeError' });
   throws('alloc("1")', () => Buffer.alloc('1'), { name: 'TypeError', code: 'ERR_INVALID_ARG_TYPE' });
+  if (process.versions.frogjs) {
+    throws('over the size limit', () => Buffer.alloc(2 ** 35), { name: 'RangeError', code: 'ERR_BUFFER_TOO_LARGE' });
+  }
   throws('allocUnsafe(-1)', () => Buffer.allocUnsafe(-1), { code: 'ERR_OUT_OF_RANGE' });
 
   section('Uint8Array');

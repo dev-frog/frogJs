@@ -10,6 +10,8 @@ function script(code) {
 
 function check_(name, code, { status = 0, stdout, stderr }) {
   const result = script(code);
+  // Killed by a signal, the status is null: the signal and stderr say why
+  if (result.status === null) console.log(`       signal ${result.signal}\n${result.stderr.slice(-2000)}`);
   check(`${name}: exit code`, result.status, status);
   if (stdout !== undefined) check(`${name}: stdout`, result.stdout, stdout);
   if (stderr !== undefined) check(`${name}: stderr`, stderr.test(result.stderr), true);
@@ -71,6 +73,10 @@ run(() => {
   check_('deep recursion', "function f() { f() } try { f() } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });
   check_('huge string', "try { let s = 'x'; for (;;) s += s } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });
   check_('huge Buffer allocation', "try { Buffer.alloc(2 ** 52) } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });
+  check_('huge allocUnsafe', "try { Buffer.allocUnsafe(2 ** 52) } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });
+  check_('huge new Buffer', "try { new Buffer(2 ** 52) } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });
+  check_('huge Uint8Array', "try { new Uint8Array(2 ** 52) } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });
+  check_('huge ArrayBuffer', "try { new ArrayBuffer(2 ** 52) } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });
   check_('throwing getter in console.log', "try { console.log({ get a() { throw new Error('g') } }) } catch (e) { console.log('caught') }", {});
   check_('throwing inspect', "try { console.log({ [Symbol.for('nodejs.util.inspect.custom')]() { throw new Error('i') } }) } catch (e) { console.log('caught') }", { stdout: 'caught\n' });
   check_('toString throws in an uncaught object', "throw { toString() { throw new Error('t') } }", { status: 1 });

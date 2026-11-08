@@ -915,7 +915,7 @@ Promise versions of `pipeline()` and `finished()`.
 ### Creating
 | Function | |
 |----------|---|
-| `Buffer.alloc(size[, fill[, encoding]])` | A zero-filled Buffer, or filled with `fill`. A bad size throws `ERR_OUT_OF_RANGE` |
+| `Buffer.alloc(size[, fill[, encoding]])` | A zero-filled Buffer, or filled with `fill`. A bad size throws `ERR_OUT_OF_RANGE`; over 32 GiB, the limit for any Buffer or ArrayBuffer, `ERR_BUFFER_TOO_LARGE` |
 | `Buffer.allocUnsafe(size)`, `Buffer.allocUnsafeSlow(size)` | Zero-filled too. `allocUnsafe` may come from a shared 8 KB pool (`Buffer.poolSize`), `allocUnsafeSlow` never does |
 | `Buffer.from(string[, encoding])` | Encode a string (default UTF-8) |
 | `Buffer.from(arrayBuffer[, byteOffset[, length]])` | A **view** of that memory |

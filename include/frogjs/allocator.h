@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <v8.h>
 
 namespace frogjs {
@@ -8,5 +9,8 @@ namespace frogjs {
 // is never destroyed: a SharedArrayBuffer or transferred buffer can outlive the
 // thread that allocated it, and it is freed through its allocator.
 v8::ArrayBuffer::Allocator* ArrayBufferAllocator();
+
+// The largest Buffer or ArrayBuffer, in bytes
+size_t MaxBufferLength();
 
 }  // namespace frogjs

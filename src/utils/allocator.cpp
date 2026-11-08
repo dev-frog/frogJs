@@ -9,6 +9,12 @@ namespace frogjs {
 
 namespace {
 
+// The largest ArrayBuffer, on every build of V8: 32 GiB, what V8 allows when built
+// with its sandbox. Without the sandbox it would accept up to 2^53 bytes and call
+// the system allocator with sizes that can't succeed, and a failure there must not
+// be able to take the process down.
+constexpr size_t kMaxArrayBufferBytes = (size_t{1} << 35) - 1;
+
 // Reuses freed blocks by size class. Allocating from V8's default allocator is
 // slow when V8 is built with its sandbox, and every Buffer of a few KB and every
 // socket read allocates. A reused block is zeroed before it is handed out, unless
@@ -53,6 +59,11 @@ public:
         inner_->Free(data, BlockSize(size_class));
     }
 
+    // V8 refuses larger sizes with a RangeError before calling the allocator
+    size_t MaxAllocationSize() const override {
+        return kMaxArrayBufferBytes < inner_->MaxAllocationSize() ? kMaxArrayBufferBytes : inner_->MaxAllocationSize();
+    }
+
 private:
     // Classes are powers of two from 512 B to 1 MB. Smaller buffers come from the
     // Buffer pool or V8's own heap, larger ones are rare and expensive anyway.
@@ -89,6 +100,10 @@ private:
 };
 
 }  // namespace
+
+size_t MaxBufferLength() {
+    return ArrayBufferAllocator()->MaxAllocationSize();
+}
 
 ArrayBuffer::Allocator* ArrayBufferAllocator() {
     static RecyclingAllocator* allocator = new RecyclingAllocator;

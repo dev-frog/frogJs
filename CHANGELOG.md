@@ -50,6 +50,7 @@ The first stable release. It fixes the API by matching Node.js in the places Fro
 - `process.stdout.end(data, callback)` called the callback twice.
 - Strings over V8's length limit aborted the process in `buf.toString()`.
 - `process.exitCode` was ignored.
+- A huge `Buffer.alloc()` killed the process on V8 builds without the sandbox. Buffers and ArrayBuffers are now limited to 32 GiB on every build, and larger ones throw a `RangeError`.
 - `Intl` and `toLocaleString()` threw, and `new Intl.DateTimeFormat()` aborted the process, because V8's ICU data file wasn't found.
 - The code didn't compile against current V8 (15.8), which is what `brew install v8` gives today.
 - See the [security review](docs/security-audit.md) for the HTTP and argument handling fixes.

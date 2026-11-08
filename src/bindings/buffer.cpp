@@ -1,4 +1,5 @@
 #include <v8.h>
+#include "frogjs/allocator.h"
 #include "frogjs/buffer.h"
 #include "frogjs/encoding.h"
 #include "frogjs/js_module.h"
@@ -51,6 +52,9 @@ function validateSize(size) {
   if (!(size >= 0 && size <= Number.MAX_SAFE_INTEGER)) {
     throw outOfRange('size', `>= 0 && <= ${Number.MAX_SAFE_INTEGER}`, size);
   }
+  if (size > native.maxLength) {
+    throw makeError(RangeError, 'ERR_BUFFER_TOO_LARGE', `Cannot create a Buffer larger than ${native.maxLength} bytes`);
+  }
 }
 
 function isSharedArrayBuffer(value) {
@@ -88,6 +92,7 @@ class Buffer extends Uint8Array {
   // Buffer.alloc() and Buffer.from()
   constructor(arg, offsetOrEncoding, length) {
     if (typeof arg === 'number') {
+      validateSize(arg);
       super(arg);
     } else if (arg instanceof ArrayBuffer) {
       super(arg, offsetOrEncoding, length);
@@ -712,6 +717,9 @@ void SetupBuffer(Isolate* isolate, Local<Context> context) {
     frogjs::SetFunction(isolate, context, native, "write", Write);
     frogjs::SetFunction(isolate, context, native, "byteLength", ByteLength);
     frogjs::SetFunction(isolate, context, native, "isEncoding", IsEncoding);
+
+    native->Set(context, String::NewFromUtf8Literal(isolate, "maxLength"),
+        Number::New(isolate, static_cast<double>(frogjs::MaxBufferLength()))).Check();
 
     Local<Value> argv[1] = {native};
     Local<Value> buffer;
