@@ -23,15 +23,18 @@ The [threat model](../SECURITY.md#threat-model) is trusted code on untrusted dat
 
 | Tool | Result |
 |------|--------|
-| AddressSanitizer + UndefinedBehaviorSanitizer on all tests (`make test-asan`) | Clean |
-| Fuzzing on the sanitizer build (`make fuzz`): about 30,000 connections with mutated HTTP, about 18,000 rounds of random Buffer calls | No crash |
-| macOS `leaks` at exit (`make leakcheck`) | 0 leaks |
+| AddressSanitizer + UndefinedBehaviorSanitizer on all tests (`make test-asan`), with V8 13.5 | Clean |
+| UndefinedBehaviorSanitizer on all tests, with V8 15.8 in CI | See CI |
+| Fuzzing on the sanitizer build (`make fuzz`), with V8 13.5: about 30,000 connections with mutated HTTP, about 18,000 rounds of random Buffer calls | No crash |
+| macOS `leaks` at exit (`make leakcheck`), with V8 13.5 | 0 leaks |
 | `-Wall -Wextra -Werror`, ESLint | Clean |
 | Parser limits and smuggling tests (`test-http-limits.js`) | Pass |
 
+**The V8 version matters here.** Homebrew's V8 15.8 loads PartitionAlloc's allocator shim, which replaces `malloc` when the library loads. AddressSanitizer can't run with it (the shim aborts at startup), and the `leaks` tool can't see allocations in it (its zone's enumerator returns an error). So on 15.8, which is what users get and what CI uses, **memory errors and native leaks aren't checked**. `make test-asan` and `make leakcheck` detect this and say so. The results above for those two tools come from V8 13.5, on the same FrogJS code. `test-memory.js`, which watches the process's memory, still runs on both.
+
 ## Not done
 
-ThreadSanitizer; coverage-guided fuzzing (the fuzzer is mutation-based and doesn't use coverage feedback, and is much shallower than libFuzzer or AFL would be); static analysis such as clang-tidy or CodeQL; any testing on Linux; review of timing side channels in hashes; an independent review.
+AddressSanitizer or a native leak check against V8 15.8; ThreadSanitizer; coverage-guided fuzzing (the fuzzer is mutation-based and doesn't use coverage feedback, and is much shallower than libFuzzer or AFL would be); static analysis such as clang-tidy or CodeQL; any testing on Linux; review of timing side channels in hashes; an independent review.
 
 ## Findings
 

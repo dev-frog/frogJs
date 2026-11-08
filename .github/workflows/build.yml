@@ -46,9 +46,11 @@ jobs:
     - name: Check the API reference
       run: make check-docs
 
-    - name: Tests under AddressSanitizer and UndefinedBehaviorSanitizer
+    # Only UndefinedBehaviorSanitizer with Homebrew's V8 15.x: see docs/security-audit.md
+    - name: Tests under sanitizers
       run: make test-asan
 
+    # Reports SKIPPED with Homebrew's V8 15.x: see docs/security-audit.md
     - name: Native leaks
       run: make leakcheck
 

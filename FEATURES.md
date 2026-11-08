@@ -390,8 +390,8 @@ Version 1.0.0. Everything above is implemented and tested. See the [changelog](C
 
 ```bash
 make test          # 21 self-tests, the CLI test and a REPL test on a real terminal
-make test-asan     # the same under AddressSanitizer and UndefinedBehaviorSanitizer
-make leakcheck     # native leaks at exit
+make test-asan     # the same under sanitizers (AddressSanitizer needs a V8 that doesn't replace malloc)
+make leakcheck     # native leaks at exit (the same condition)
 make coverage      # line coverage of the C++ and the embedded JavaScript
 make fuzz          # random input for the HTTP parser and Buffer
 make check         # lint, tests, type checks and the API reference check

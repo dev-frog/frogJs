@@ -421,7 +421,7 @@ declare module 'http' { ... }
 | Complete feature parity with planned v0.x features | ✅ Done | Every feature listed under v0.2.0 to v0.9.0 exists and is tested. Most "not included yet" items that would have changed the API were also done, so they don't break it later |
 | Comprehensive test suite | ✅ Done | 21 self-tests, the CLI and REPL tests, under sanitizers too; the old ones that only printed now assert |
 | Performance optimizations | ✅ Done | [docs/performance.md](docs/performance.md) |
-| Memory leak fixes | ✅ Done | Buffers, file descriptors, digests; `make leakcheck` finds 0 leaks, and RSS stays flat over long runs |
+| Memory leak fixes | ✅ Done | Buffers, file descriptors, digests; `make leakcheck` finds 0 leaks with V8 13.5, and RSS stays flat over long runs |
 | Security audit | ⚠️ Internal review done | [docs/security-audit.md](docs/security-audit.md). Not an independent, third-party audit |
 | Complete documentation | ✅ Done | `make check-docs` ties the API reference to the declarations, and `make check-types` ties those to the runtime |
 | API stability guarantees | ✅ Written | [docs/api-stability.md](docs/api-stability.md) |
@@ -476,7 +476,7 @@ Measured on macOS on Apple Silicon, 2026-11-09:
 | All planned v0.x features complete | ✅ Met | |
 | 90%+ test coverage | ✅ Met | 91.5% of lines: JavaScript 91.3%, C++ 91.8% (`make coverage COVERAGE_MIN=90`, in CI). Worker threads' JavaScript isn't recorded, so it counts as uncovered |
 | Performance within 2x of Node.js for equivalent operations | ⚠️ Mostly | 19 of 23 benchmarks in the last run. `stream-pipe` and `sha256-small` are about 2.9x and `buffer-hex-base64` about 2.2x; `timers` and `sha256-large` sit right at 2x. See [performance](docs/performance.md) |
-| No known memory leaks | ✅ Met | `make leakcheck`: 0 leaks. `test-memory.js`: no growth. On macOS only |
+| No known memory leaks | ✅ Met, with a gap | `make leakcheck`: 0 leaks with V8 13.5. It can't run against Homebrew's current V8 (15.8), where only `test-memory.js` (no growth) applies. On macOS only |
 | API stability for 6+ months | ❌ Not met | It can't be met yet: 1.0.0 itself changes APIs, so the clock starts with this release |
 | Production-ready error handling | ✅ Met | Uncaught errors and rejections, exit codes, `Error` objects with `code`, hostile input handled |
 | Complete API documentation | ✅ Met | `make check-docs`: all declared names documented |

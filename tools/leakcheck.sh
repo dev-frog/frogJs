@@ -6,6 +6,16 @@ if ! command -v leaks > /dev/null; then
     echo "leakcheck needs the macOS leaks tool: on Linux use valgrind or LeakSanitizer" >&2
     exit 1
 fi
+
+# Newer V8 builds replace malloc with PartitionAlloc, whose zone doesn't let leaks
+# enumerate allocations. It would report 0 leaks whatever the truth: say so instead.
+V8_LIB="$(otool -L "$FROGJS" | awk '/libv8\.dylib/ { print $1 }')"
+if [ -n "$V8_LIB" ] && otool -L "$V8_LIB" 2> /dev/null | grep -q allocator_shim; then
+    echo "SKIPPED: $V8_LIB replaces malloc, so the leaks tool can't see allocations."
+    echo "Native leaks are NOT being checked. Use a V8 that doesn't load the shim (Homebrew's 13.5 doesn't)."
+    exit 0
+fi
+
 TMP_DIR="$(mktemp -d)"
 trap 'rm -r "$TMP_DIR"' EXIT
 

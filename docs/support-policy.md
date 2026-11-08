@@ -33,7 +33,7 @@ Results such as leak checks and benchmarks are measured on the supported platfor
 
 ## Dependencies
 
-FrogJS links V8 and libuv dynamically, so their security fixes reach you through your system: keep them updated (`brew upgrade v8 libuv`). FrogJS 1.0.0 was built and tested with V8 13.5 and libuv 1.52. It also compiles without warnings against V8 15.8, which is what Homebrew installs today, but the test results in these documents are from 13.5. A new V8 can require a new FrogJS release. `frogjs` is linked to the V8 it was built with: rebuild it (run `install.sh` again) after upgrading V8.
+FrogJS links V8 and libuv dynamically, so their security fixes reach you through your system: keep them updated (`brew upgrade v8 libuv`). FrogJS 1.0.0 was built and tested with V8 13.5 and libuv 1.52. It also compiles without warnings against V8 15.8, which is what Homebrew installs today, and CI runs the tests against it, but the AddressSanitizer, leak and benchmark results in these documents are from 13.5. A new V8 can require a new FrogJS release. `frogjs` is linked to the V8 it was built with: rebuild it (run `install.sh` again) after upgrading V8.
 
 ## Getting help
 

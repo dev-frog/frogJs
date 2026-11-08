@@ -54,8 +54,8 @@ The Makefile finds Homebrew's V8 and libuv. Elsewhere, pass the install prefixes
 | `make format-check` | clang-format on the C++ lines changed since `main` (`make format` fixes them) |
 | `make check-docs` | Every declared export appears in `docs/api-reference.md` |
 | `make check` | lint + test + check-types + check-docs |
-| `make test-asan` | The tests under AddressSanitizer and UndefinedBehaviorSanitizer |
-| `make leakcheck` | Native leaks at exit (macOS `leaks`) |
+| `make test-asan` | The tests under AddressSanitizer and UndefinedBehaviorSanitizer. With a V8 that replaces `malloc` (Homebrew's 15.x), AddressSanitizer can't run: it uses UndefinedBehaviorSanitizer only and says so |
+| `make leakcheck` | Native leaks at exit (macOS `leaks`). Reports SKIPPED with a V8 that replaces `malloc` |
 | `make coverage COVERAGE_MIN=90` | Line coverage of the C++ and the embedded JavaScript; add `--show-missing` to `tools/coverage.py` to see which lines |
 | `make fuzz` | Random input for the HTTP parser and Buffer. `FUZZ_SECONDS` sets the time per target, `FUZZ_SEED` repeats a run. It opens many connections, so run it last: ports stay in `TIME_WAIT` for a while |
 | `make bench` | Benchmarks against Node.js |
@@ -75,7 +75,7 @@ node examples/test-child-process.js     # must agree
 
 A new test goes in `examples/test-<area>.js` with the helpers of `examples/lib/check.js` (`check`, `throws`, `rejects`, `run`). Add it to `TESTS` in the Makefile and in `tools/coverage.py`, and to the examples list in `README.md`. Test the edges and the failures too: wrong argument types, error codes, empty input, and what happens after close or exit.
 
-Changes to native code that manages memory or threads need `make test-asan` and `make leakcheck`.
+Changes to native code that manages memory or threads need `make test-asan` and `make leakcheck`, with a V8 where they can run (Homebrew's 13.5): CI's V8 can't check memory errors or native leaks.
 
 ## Adding to FrogJS
 

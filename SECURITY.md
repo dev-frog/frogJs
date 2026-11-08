@@ -28,7 +28,7 @@ Also in scope: a server exhausting memory because of what a client sends when th
 
 ## What protects you
 
-- **Memory safety**: Buffers are `Uint8Array`s, so V8 checks bounds. CI runs every test under AddressSanitizer and UndefinedBehaviorSanitizer, and fuzzes the HTTP parser and Buffer.
+- **Memory safety**: Buffers are `Uint8Array`s, so V8 checks bounds. CI runs every test under UndefinedBehaviorSanitizer and fuzzes the HTTP parser and Buffer. AddressSanitizer can't run against Homebrew's current V8, so it was run with V8 13.5 for this release and isn't part of CI (see the [security review](docs/security-audit.md#tools)).
 - **HTTP**: strict parsing against request smuggling, header injection checks, size limits, timeouts and backpressure. `test-http-limits.js` tests each with hostile input.
 - **Crypto**: random bytes come from the operating system; `timingSafeEqual` runs in constant time for a given length. Hashes are checked against Node.js. FrogJS has no ciphers or TLS: terminate TLS in a proxy.
 

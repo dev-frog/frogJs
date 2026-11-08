@@ -134,10 +134,23 @@ test: $(TARGET)
 
 # The tests on a build with AddressSanitizer and UndefinedBehaviorSanitizer
 # (LeakSanitizer isn't available on macOS: see leakcheck)
+#
+# Newer V8 builds (Homebrew's 15.x) load PartitionAlloc's allocator shim, which
+# replaces malloc when the library loads and aborts if AddressSanitizer already
+# has. With those, only UndefinedBehaviorSanitizer can run. To check memory
+# errors, use a V8 that doesn't load the shim (Homebrew's 13.5 doesn't).
+V8_LOADS_ALLOCATOR_SHIM := $(shell otool -L $(V8_PATH)/lib/libv8.dylib 2>/dev/null | grep -c allocator_shim)
+ifneq ($(filter-out 0,$(V8_LOADS_ALLOCATOR_SHIM)),)
+SAN_FLAGS = -fsanitize=undefined -fno-omit-frame-pointer -fno-sanitize=vptr
+SAN_NOTICE = NOTE: this V8 replaces malloc, which AddressSanitizer can't work with: running UndefinedBehaviorSanitizer only, so memory errors are NOT being checked
+else
 SAN_FLAGS = -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize=vptr
+SAN_NOTICE = Running AddressSanitizer and UndefinedBehaviorSanitizer
+endif
 export ASAN_OPTIONS = detect_leaks=0:quarantine_size_mb=8
 export UBSAN_OPTIONS = print_stacktrace=1:halt_on_error=1
 test-asan:
+	@echo "$(SAN_NOTICE)"
 	$(MAKE) test BUILD_DIR=build/asan OPTFLAGS="-O1 -g" EXTRA_FLAGS="$(SAN_FLAGS)" TEST_TIMEOUT=300
 
 # Native leaks at exit, reported by macOS's leaks tool
@@ -158,6 +171,7 @@ bench: $(TARGET)
 
 # Random input for the HTTP parser and Buffer, on the sanitizer build
 fuzz:
+	@echo "$(SAN_NOTICE)"
 	$(MAKE) build/asan/frogjs BUILD_DIR=build/asan OPTFLAGS="-O1 -g" EXTRA_FLAGS="$(SAN_FLAGS)"
 	./build/asan/frogjs tools/fuzz.js
 
