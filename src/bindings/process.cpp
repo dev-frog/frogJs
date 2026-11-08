@@ -12,6 +12,7 @@
 #include <cstring>
 #include <map>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <string>
 #include <vector>

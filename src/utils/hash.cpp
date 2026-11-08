@@ -239,7 +239,13 @@ private:
 #if defined(__aarch64__)
 
 // The ARMv8 SHA-2 instructions: several times faster than the portable code below
-__attribute__((target("sha2"))) void Sha256CompressArm(uint32_t* state, const uint8_t* block) {
+#if defined(__clang__)
+#define FROGJS_TARGET_SHA2 __attribute__((target("sha2")))
+#else
+#define FROGJS_TARGET_SHA2 __attribute__((target("+crypto")))
+#endif
+
+FROGJS_TARGET_SHA2 void Sha256CompressArm(uint32_t* state, const uint8_t* block) {
     uint32x4_t abcd = vld1q_u32(state);
     uint32x4_t efgh = vld1q_u32(state + 4);
     const uint32x4_t abcd_start = abcd;

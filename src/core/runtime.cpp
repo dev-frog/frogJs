@@ -355,6 +355,29 @@ static Local<Context> CreateMainContext(Isolate* isolate) {
     return frogjs::CreateContext(isolate, g_process_argv, g_exec_argv, g_main_filename);
 }
 
+// V8 needs its ICU data file for Intl and toLocaleString(). It only looks next
+// to the executable by itself, which isn't where an installed frogjs is.
+static void InitializeICU() {
+    std::vector<std::string> candidates;
+    if (const char* from_env = getenv("FROGJS_ICU_DATA")) candidates.push_back(from_env);
+    char exec_path[PATH_MAX];
+    size_t exec_size = sizeof(exec_path);
+    if (uv_exepath(exec_path, &exec_size) == 0) {
+        std::string path(exec_path);
+        size_t slash = path.rfind('/');
+        if (slash != std::string::npos) candidates.push_back(path.substr(0, slash + 1) + "icudtl.dat");
+    }
+#ifdef FROGJS_ICU_DATA_PATH
+    candidates.push_back(FROGJS_ICU_DATA_PATH);
+#endif
+    for (const std::string& candidate : candidates) {
+        struct stat info;
+        if (stat(candidate.c_str(), &info) == 0 && V8::InitializeICU(candidate.c_str())) return;
+    }
+    // A V8 with ICU built in needs no file
+    V8::InitializeICU();
+}
+
 int main(int argc, char* argv[]) {
     Options opts;
     int parse_result = ParseArgs(argc, argv, &opts);
@@ -412,7 +435,7 @@ int main(int argc, char* argv[]) {
     bool start_repl = opts.interactive || (!has_code && !opts.check);
 
     // Initialize V8
-    V8::InitializeICUDefaultLocation(argv[0]);
+    InitializeICU();
     V8::InitializeExternalStartupData(argv[0]);
     std::unique_ptr<Platform> platform = platform::NewDefaultPlatform();
     V8::InitializePlatform(platform.get());

@@ -112,6 +112,13 @@ run(async () => {
   throws('structuredClone a function', () => structuredClone(() => {}), { name: 'DataCloneError' });
   throws('structuredClone nothing', () => structuredClone(), { name: 'TypeError' });
 
+  section('Intl');
+  check('NumberFormat', new Intl.NumberFormat('en-US').format(1234.5), '1,234.5');
+  check('toLocaleString', (1234.5).toLocaleString('en-US'), '1,234.5');
+  check('DateTimeFormat', new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', year: 'numeric' }).format(new Date(0)), '1970');
+  check('localeCompare', 'a'.localeCompare('b'), -1);
+  check('from another directory too', child("console.log(new Intl.NumberFormat('en-US').format(1000))", { cwd: '/' }).stdout, '1,000\n');
+
   section('TextEncoder and TextDecoder');
   check('encode', Array.from(new TextEncoder().encode('€')), [226, 130, 172]);
   check('encode gives Uint8Array', new TextEncoder().encode('a') instanceof Uint8Array, true);

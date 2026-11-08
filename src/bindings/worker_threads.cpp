@@ -330,7 +330,7 @@ Local<Value> NewDataCloneError(Isolate* isolate, Local<String> message) {
 PortHandle* UnwrapPort(Local<Value> value) {
     if (!value->IsObject() || g_port_template.IsEmpty()) return nullptr;
     Local<Object> object = value.As<Object>();
-    Isolate* isolate = object->GetIsolate();
+    Isolate* isolate = Isolate::GetCurrent();
     if (!g_port_template.Get(isolate)->HasInstance(object) || object->InternalFieldCount() < 1) return nullptr;
     Local<Value> field = object->GetInternalField(0).As<Value>();
     if (!field->IsExternal()) return nullptr;

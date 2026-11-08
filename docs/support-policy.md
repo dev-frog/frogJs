@@ -26,14 +26,14 @@ Report vulnerabilities as described in [SECURITY.md](../SECURITY.md). The goal i
 |----------|---------|---------|
 | macOS on Apple Silicon | **Supported** | Built and tested in CI on every change, and released as a binary |
 | macOS on Intel | Best effort | Should build; not tested. SHA-256 runs without hardware acceleration |
-| Linux | Best effort | Should build with a V8 you provide; not tested in CI. Fixes are welcome, but it isn't a release blocker |
-| Windows | Not supported | The REPL, signals and path handling assume POSIX |
+| Linux | Best effort | `install.sh` builds it with Homebrew's V8, but this hasn't been tested on Linux or in CI yet. Fixes are welcome, but it isn't a release blocker |
+| Windows | Through WSL only | Natively, the REPL, signals and path handling assume POSIX. Under WSL it counts as Linux |
 
 Results such as leak checks and benchmarks are measured on the supported platform and don't automatically hold elsewhere. Linux's leak check, for one, would need a different tool.
 
 ## Dependencies
 
-FrogJS links V8 and libuv dynamically, so their security fixes reach you through your system: keep them updated (`brew upgrade v8 libuv`). FrogJS 1.0.0 was built and tested with V8 13.5 and libuv 1.52. `include/frogjs/v8_compat.h` has helpers for API differences in newer V8, but the 1.0.0 code hasn't been built against one, and a new V8 can require a new FrogJS release.
+FrogJS links V8 and libuv dynamically, so their security fixes reach you through your system: keep them updated (`brew upgrade v8 libuv`). FrogJS 1.0.0 was built and tested with V8 13.5 and libuv 1.52. It also compiles without warnings against V8 15.8, which is what Homebrew installs today, but the test results in these documents are from 13.5. A new V8 can require a new FrogJS release. `frogjs` is linked to the V8 it was built with: rebuild it (run `install.sh` again) after upgrading V8.
 
 ## Getting help
 

@@ -37,8 +37,9 @@ endif
 V8_LIBS = -L$(V8_PATH)/lib -lv8 -lv8_libplatform
 LIBUV_LIBS = -L$(LIBUV_PATH)/lib -luv
 # The REPL's Ctrl+C watchdog runs on a thread
+# Linux: find the libraries at run time without LD_LIBRARY_PATH
 ifneq ($(shell uname -s),Darwin)
-LIBUV_LIBS += -lpthread
+LIBUV_LIBS += -lpthread -Wl,-rpath,$(V8_PATH)/lib -Wl,-rpath,$(V8_PATH)/libexec -Wl,-rpath,$(LIBUV_PATH)/lib
 endif
 
 # Source and build directories
@@ -84,6 +85,10 @@ DEPS = $(OBJS:.o=.d)
 $(BUILD_DIR)/obj/$(SRC_DIR)/bindings/worker_threads.o: CXXFLAGS += -fno-rtti
 $(BUILD_DIR)/obj/$(SRC_DIR)/utils/coverage.o: CXXFLAGS += -fno-rtti
 $(BUILD_DIR)/obj/$(SRC_DIR)/utils/allocator.o: CXXFLAGS += -fno-rtti
+
+# Where V8's ICU data file is, for Intl and toLocaleString()
+ICU_DATA_PATH ?= $(V8_PATH)/libexec/icudtl.dat
+$(BUILD_DIR)/obj/$(SRC_DIR)/core/runtime.o: CXXFLAGS += -DFROGJS_ICU_DATA_PATH='"$(ICU_DATA_PATH)"'
 
 # Default target
 all: $(TARGET)

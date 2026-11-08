@@ -55,21 +55,45 @@ make V8_PATH=/path/to/v8 LIBUV_PATH=/usr
 
 ## Installation
 
-### Download a Prebuilt Release (macOS Apple Silicon)
-
-Prebuilt binaries are published on the [Releases page](https://github.com/dev-frog/frogJs/releases) for every version tag.
+### macOS and Linux
 
 ```bash
-brew install v8 libuv   # runtime dependencies (linked dynamically)
-
-VERSION=0.5.0   # pick a version from the Releases page
-curl -LO https://github.com/dev-frog/frogJs/releases/download/v$VERSION/frogjs-$VERSION-macos-arm64.tar.gz
-curl -LO https://github.com/dev-frog/frogJs/releases/download/v$VERSION/frogjs-$VERSION-macos-arm64.tar.gz.sha256
-shasum -a 256 -c frogjs-$VERSION-macos-arm64.tar.gz.sha256
-
-tar -xzf frogjs-$VERSION-macos-arm64.tar.gz
-./frogjs-$VERSION-macos-arm64/frogjs your-script.js
+curl -fsSL https://raw.githubusercontent.com/dev-frog/frogJs/main/install.sh | sh
 ```
+
+Then open a new terminal:
+
+```bash
+frogjs --version
+frogjs your-script.js
+```
+
+The [installer](install.sh) gets V8 and libuv from [Homebrew](https://brew.sh) if they are missing, builds FrogJS, puts `frogjs` in `~/.frogjs/bin`, and adds that to your PATH. You need Homebrew and a C++ compiler (macOS: `xcode-select --install`; Debian/Ubuntu: `sudo apt-get install build-essential`).
+
+A specific version: `curl -fsSL .../install.sh | FROGJS_VERSION=v1.0.0 sh`. Other settings are at the top of the script. To update, run it again. **Also run it again after `brew upgrade v8`**, because `frogjs` is built for the V8 it found. To remove FrogJS: `rm -r ~/.frogjs`, and delete the FrogJS lines from your shell profile.
+
+Linux is best effort: see the [support policy](docs/support-policy.md#platforms).
+
+### Windows
+
+There is no native Windows version. Use WSL (Windows Subsystem for Linux). In PowerShell, as administrator:
+
+```powershell
+wsl --install
+```
+
+Restart, open the Ubuntu app, and follow the Linux steps there:
+
+```bash
+sudo apt-get update && sudo apt-get install -y build-essential curl git
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+curl -fsSL https://raw.githubusercontent.com/dev-frog/frogJs/main/install.sh | sh
+```
+
+### Prebuilt binaries (macOS Apple Silicon)
+
+Tagged releases have a binary on the [Releases page](https://github.com/dev-frog/frogJs/releases). It only starts with the V8 version it was built for, so the installer above is usually the better choice.
 
 ### Clone the Repository
 ```bash

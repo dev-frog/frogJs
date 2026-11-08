@@ -32,6 +32,7 @@ The first stable release. It fixes the API by matching Node.js in the places Fro
 - Modules: `node_modules`, `package.json` `main` and `exports`, `.json` files, `node:` names, `buffer`, `timers`, `process` and `module` as modules, `require.resolve`, `require.cache`, `require.main`, circular requires with partial exports, top-level `return`.
 - `path`: `relative`, `parse`, `format`, `posix`.
 - HTTP: `write()` reports backpressure, with `'drain'`; `server.requestTimeout`.
+- `install.sh`: install on macOS and Linux (and Windows through WSL).
 - [API stability policy](docs/api-stability.md), [support policy](docs/support-policy.md), [SECURITY.md](SECURITY.md), [security review](docs/security-audit.md), [benchmarks](docs/performance.md).
 - Tooling: `make test-asan`, `leakcheck`, `coverage`, `bench`, `fuzz`, `check-docs`.
 
@@ -49,6 +50,8 @@ The first stable release. It fixes the API by matching Node.js in the places Fro
 - `process.stdout.end(data, callback)` called the callback twice.
 - Strings over V8's length limit aborted the process in `buf.toString()`.
 - `process.exitCode` was ignored.
+- `Intl` and `toLocaleString()` threw, and `new Intl.DateTimeFormat()` aborted the process, because V8's ICU data file wasn't found.
+- The code didn't compile against current V8 (15.8), which is what `brew install v8` gives today.
 - See the [security review](docs/security-audit.md) for the HTTP and argument handling fixes.
 
 ### Performance
