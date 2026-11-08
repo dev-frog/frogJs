@@ -140,10 +140,21 @@ run(async () => {
   await once(writer, 'connect');
   await sleep(5);
   const chunk = Buffer.alloc(1024 * 1024, 'x');
+  // 'drain' only means the kernel took the data, and it has room for a lot. So
+  // write until no 'drain' comes: the kernel's buffers are full and the peer isn't
+  // reading. Only from there does 'drain' depend on the peer.
+  let drained = null;
   let writes = 0;
-  while (writer.write(chunk) && writes < 200) writes++;
-  check('write() returns false when the socket is full', writes < 200, true);
-  const drained = once(writer, 'drain');
+  let stalled = false;
+  while (!stalled && writes < 200) {
+    writes++;
+    if (!writer.write(chunk)) {
+      drained = once(writer, 'drain');
+      stalled = await Promise.race([drained.then(() => false), sleep(500).then(() => true)]);
+    }
+  }
+  check('the socket stalls when the peer does not read', stalled, true);
+  check('some data is still queued in the stream', writer.writableLength > 0, true);
   let total = 0;
   peerSocket.on('data', (d) => {
     total += d.length;
