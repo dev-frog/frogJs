@@ -73,6 +73,13 @@ run(() => {
   check_('deep recursion', "function f() { f() } try { f() } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });
   check_('huge string', "try { let s = 'x'; for (;;) s += s } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });
   check_('huge Buffer allocation', "try { Buffer.alloc(2 ** 52) } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });
+  // A size the allocator may refuse must never end the process: it works, or it's a RangeError
+  const allocates = (expression) => `let ok; try { ok = (${expression}) } catch (e) { ok = e.name === 'RangeError' } console.log(ok)`;
+  check_('2 GiB Buffer.alloc', allocates('Buffer.alloc(2 ** 31).length === 2 ** 31'), { stdout: 'true\n' });
+  check_('4 GiB Buffer.alloc', allocates('Buffer.alloc(2 ** 32 + 1).length === 2 ** 32 + 1'), { stdout: 'true\n' });
+  check_('2 GiB Buffer.concat', allocates("Buffer.concat([Buffer.from('ab')], 2 ** 31).length === 2 ** 31"), { stdout: 'true\n' });
+  check_('4 GiB Uint8Array', allocates('new Uint8Array(2 ** 32).length === 2 ** 32'), { stdout: 'true\n' });
+  check_('4 GiB ArrayBuffer', allocates('new ArrayBuffer(2 ** 32).byteLength === 2 ** 32'), { stdout: 'true\n' });
   check_('huge allocUnsafe', "try { Buffer.allocUnsafe(2 ** 52) } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });
   check_('huge new Buffer', "try { new Buffer(2 ** 52) } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });
   check_('huge Uint8Array', "try { new Uint8Array(2 ** 52) } catch (e) { console.log(e.name) }", { stdout: 'RangeError\n' });

@@ -145,6 +145,24 @@ run(async () => {
   check('access mode', (await call(fs.access, file, fs.constants.R_OK))[0], null);
   checkError('access ENOENT', (await call(fs.access, at('nope')))[0], { code: 'ENOENT' });
 
+  if (process.versions.frogjs) {
+    section('Size limits');
+    // A sparse file: over 2 GiB without using the disk
+    const sparse = fs.openSync(at('sparse'), 'w');
+    fs.writeSync(sparse, 'x', 2 ** 31 + 10);
+    fs.closeSync(sparse);
+    throws('readFileSync of over 2 GiB', () => fs.readFileSync(at('sparse')), { code: 'EFBIG' });
+    checkError('readFile of over 2 GiB', (await call(fs.readFile, at('sparse')))[0], { code: 'EFBIG' });
+    fs.unlinkSync(at('sparse'));
+    let huge = null;
+    try {
+      huge = Buffer.alloc(2 ** 31);
+    } catch (err) {
+      console.log('  (no 2 GiB Buffer here: ' + err.name + ')');
+    }
+    if (huge) throws('writeFileSync of 2 GiB', () => fs.writeFileSync(at('huge'), huge), { code: 'ERR_FS_FILE_TOO_LARGE' });
+  }
+
   section('realpath');
   check('realpathSync', fs.realpathSync(at('d/../a.txt')), file);
   throws('realpathSync ENOENT', () => fs.realpathSync(at('nope')), { code: 'ENOENT' });

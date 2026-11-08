@@ -64,6 +64,7 @@ All of these were fixed in 1.0.0.
 | 13 | `Transfer-Encoding` was accepted on HTTP/1.0 requests | Request smuggling surface behind a proxy | `400` |
 | 14 | `setTimeout(fn, -1)` became a delay of about 584 million years, and `fs.writeFile` leaked its descriptor on every call | A hang from input; descriptor exhaustion | Delays normalized; the operation closes what it opens |
 | 15 | Uncaught errors in callbacks were only printed, and unhandled rejections ignored entirely | A program carries on in an unknown state, and a failed security check inside a promise goes unnoticed | They end the process unless a listener takes them, as in Node.js |
+| 16a | With V8 15.8, an allocation of 2 GiB or more ended the process, because PartitionAlloc replaces `malloc` and terminates on requests it can't serve. Found by the fuzzer in CI | A size from input ended the process | Large ArrayBuffers bypass `malloc` and fail with a `RangeError`; native copies of caller buffers are limited to 2 GiB |
 | 16 | A string longer than V8's limit aborted the process (`ToLocalChecked`) in `toString()` | Large input aborted the process | `ERR_STRING_TOO_LONG` |
 
 ### Low
@@ -84,6 +85,7 @@ All of these were fixed in 1.0.0.
 
 ## Accepted risks
 
+- **On V8 builds that replace `malloc`, real exhaustion ends the process.** Small allocations and native copies still go through PartitionAlloc, which terminates when the system is truly out of memory. `postMessage()` of a value serializing to over 2 GiB is the one known way to reach this from a single large input.
 - **Secrets aren't wiped from memory.** Keys and passwords stay in JavaScript strings and freed blocks until overwritten. JavaScript gives no way to prevent copies.
 - **A handler that throws gets the client a `500`**, and the server goes on, unlike the fatal default elsewhere. This is deliberate and documented, but state shared with that handler may be inconsistent.
 - **MD5 and SHA-1 are available**, for compatibility.

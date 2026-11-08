@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "frogjs/allocator.h"
 #include "frogjs/buffer.h"
 #include "frogjs/encoding.h"
 #include "frogjs/errors.h"
@@ -1015,6 +1016,10 @@ void Write(const FunctionCallbackInfo<Value>& args) {
     PipeWrap* wrap = Unwrap<PipeWrap>(args[0]);
     if (wrap == nullptr || wrap->closing) {
         args.GetReturnValue().Set(UV_EPIPE);
+        return;
+    }
+    if (args[1]->IsArrayBufferView() && args[1].As<ArrayBufferView>()->ByteLength() > frogjs::kMaxNativeCopy) {
+        args.GetReturnValue().Set(UV_E2BIG);
         return;
     }
     WriteReq* req = new WriteReq;

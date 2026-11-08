@@ -1,5 +1,6 @@
 #include <v8.h>
 #include <uv.h>
+#include "frogjs/allocator.h"
 #include "frogjs/buffer.h"
 #include "frogjs/encoding.h"
 #include "frogjs/errors.h"
@@ -772,6 +773,7 @@ void Write(const FunctionCallbackInfo<Value>& args) {
         return args.GetReturnValue().Set(UV_EINVAL);
     }
     if (length == 0) return args.GetReturnValue().Set(1.0);  // nothing to do
+    if (length > frogjs::kMaxNativeCopy) return args.GetReturnValue().Set(UV_E2BIG);
 
     // Most writes fit in the kernel's buffer right away, without a copy or a request
     uv_stream_t* stream = reinterpret_cast<uv_stream_t*>(&wrap->handle);

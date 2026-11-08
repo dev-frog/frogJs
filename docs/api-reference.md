@@ -334,6 +334,8 @@ Cancel it. Anything else, or a timer that already ended, is ignored.
 
 **Paths** are strings, Buffers or `Uint8Array`s (UTF-8).
 
+**Size limits**: one `readFile` handles up to 2 GiB (larger fails with `EFBIG`), and one `writeFile` or `write` call up to 2 GiB (larger throws `ERR_FS_FILE_TOO_LARGE`). `read` returns at most 2 GiB per call. Streams have no such limit.
+
 ### Whole files
 | Function | |
 |----------|---|
@@ -448,7 +450,7 @@ Events: `'connection'` (socket), `'listening'`, `'close'`, `'error'`, `'drop'`.
 `net.connect(port[, host][, listener])` or `net.connect({ port, host, timeout, allowHalfOpen, highWaterMark }[, listener])`. Returns a `Socket` that is connecting. The host defaults to `'localhost'`; names are resolved and each address tried, IPv4 first. A host with a null byte throws `ERR_INVALID_ARG_VALUE`.
 
 ### `net.Socket`
-A Duplex stream: `pipe()`, `setEncoding()`, `pause()`, `for await`, and `write()` returning `false` when the kernel can't keep up, followed by `'drain'`. Received data is a Buffer until `setEncoding()` is called.
+A Duplex stream: `pipe()`, `setEncoding()`, `pause()`, `for await`, and `write()` returning `false` when the kernel can't keep up, followed by `'drain'`. One chunk can be up to 2 GiB (larger fails with `E2BIG`). Received data is a Buffer until `setEncoding()` is called.
 
 | Member | |
 |--------|---|
@@ -915,7 +917,7 @@ Promise versions of `pipeline()` and `finished()`.
 ### Creating
 | Function | |
 |----------|---|
-| `Buffer.alloc(size[, fill[, encoding]])` | A zero-filled Buffer, or filled with `fill`. A bad size throws `ERR_OUT_OF_RANGE`; over 32 GiB, the limit for any Buffer or ArrayBuffer, `ERR_BUFFER_TOO_LARGE` |
+| `Buffer.alloc(size[, fill[, encoding]])` | A zero-filled Buffer, or filled with `fill`. A bad size throws `ERR_OUT_OF_RANGE`; over 32 GiB, the limit for any Buffer or ArrayBuffer, `ERR_BUFFER_TOO_LARGE`. If the system can't provide the memory, a `RangeError` |
 | `Buffer.allocUnsafe(size)`, `Buffer.allocUnsafeSlow(size)` | Zero-filled too. `allocUnsafe` may come from a shared 8 KB pool (`Buffer.poolSize`), `allocUnsafeSlow` never does |
 | `Buffer.from(string[, encoding])` | Encode a string (default UTF-8) |
 | `Buffer.from(arrayBuffer[, byteOffset[, length]])` | A **view** of that memory |

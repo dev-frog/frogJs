@@ -1,5 +1,6 @@
 #include <v8.h>
 #include <uv.h>
+#include "frogjs/allocator.h"
 #include "frogjs/buffer.h"
 #include "frogjs/encoding.h"
 #include "frogjs/errors.h"
@@ -26,6 +27,9 @@ static const char* kFsSource = R"JS(
 
 const { Readable, Writable } = stream;
 const { O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_TRUNC, O_APPEND, O_EXCL, O_SYNC } = native.constants;
+
+// The most one read or write handles (reads return less, like the system call)
+const MAX_IO_BYTES = 2147483647;
 
 function makeError(Ctor, code, message) {
   const err = new Ctor(message);
@@ -118,10 +122,17 @@ function toMode(mode, fallback) {
   return mode;
 }
 
+function checkWriteSize(bytes) {
+  if (bytes.byteLength > MAX_IO_BYTES) {
+    throw makeError(RangeError, 'ERR_FS_FILE_TOO_LARGE', `Cannot write ${bytes.byteLength} bytes at once: the limit is 2 GiB`);
+  }
+  return bytes;
+}
+
 function toData(data, encoding) {
   if (typeof data === 'string') return Buffer.from(data, encoding || 'utf8');
-  if (data instanceof Uint8Array) return data;
-  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (data instanceof Uint8Array) return checkWriteSize(data);
+  if (ArrayBuffer.isView(data)) return checkWriteSize(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
   throw invalidType('data', 'of type string or an instance of Buffer, TypedArray, or DataView', data);
 }
 
@@ -452,7 +463,7 @@ function toPosition(position) {
 function readSync(fd, buffer, offset, length, position) {
   if (offset !== null && typeof offset === 'object') ({ offset, length, position } = offset);
   const range = readRange(buffer, offset, length);
-  const data = native.read(checkFd(fd), range.length, toPosition(position));
+  const data = native.read(checkFd(fd), Math.min(range.length, MAX_IO_BYTES), toPosition(position));
   copyInto(buffer, range.offset, data);
   return data.length;
 }
@@ -467,7 +478,7 @@ function read(fd, buffer, offset, length, position, callback) {
   }
   checkCallback(callback);
   const range = readRange(buffer, offset, length);
-  native.read(checkFd(fd), range.length, toPosition(position), (err, data) => {
+  native.read(checkFd(fd), Math.min(range.length, MAX_IO_BYTES), toPosition(position), (err, data) => {
     if (err) return callback(err, 0, buffer);
     copyInto(buffer, range.offset, data);
     callback(null, data.length, buffer);
@@ -481,7 +492,7 @@ function writeArgs(data, a, b, c) {
   }
   if (!ArrayBuffer.isView(data)) throw invalidType('buffer', 'of type string or an instance of Buffer, TypedArray, or DataView', data);
   const range = readRange(data, a, b);
-  const bytes = new Uint8Array(data.buffer, data.byteOffset + range.offset, range.length);
+  const bytes = checkWriteSize(new Uint8Array(data.buffer, data.byteOffset + range.offset, range.length));
   return { bytes, position: toPosition(c) };
 }
 
@@ -611,7 +622,7 @@ class WriteStream extends Writable {
     }
     const bytes = typeof chunk === 'string' ? Buffer.from(chunk, encoding === 'buffer' ? 'utf8' : encoding) : chunk;
     const writeAll = (offset) => {
-      const part = offset === 0 ? bytes : bytes.subarray(offset);
+      const part = bytes.subarray(offset, offset + MAX_IO_BYTES);
       native.write(this.fd, part, toPosition(this.pos), (err, written) => {
         if (err) return callback(err);
         this.bytesWritten += written;
@@ -769,6 +780,12 @@ void ReadWholeFile(FsOp* op) {
     size_t chunk = hint > 0 ? hint + 1 : 65536;
     for (;;) {
         size_t used = content.size();
+        // A Buffer could hold more, but this copy can't be allowed to fail
+        if (used + chunk > frogjs::kMaxNativeCopy) {
+            op->status = UV_EFBIG;
+            op->syscall = "read";
+            break;
+        }
         content.resize(used + chunk);
         uv_buf_t buf = uv_buf_init(&content[used], static_cast<unsigned int>(std::min<size_t>(chunk, 1u << 30)));
         int64_t count = Run(op, "read", [&](uv_fs_t* req) {

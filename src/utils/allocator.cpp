@@ -2,6 +2,10 @@
 #include <cstring>
 #include <mutex>
 #include <vector>
+#ifndef V8_ENABLE_SANDBOX
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 using namespace v8;
 
@@ -20,13 +24,19 @@ constexpr size_t kMaxArrayBufferBytes = (size_t{1} << 35) - 1;
 // socket read allocates. A reused block is zeroed before it is handed out, unless
 // the caller asked for uninitialized memory, which only native code that fills it
 // at once does.
+//
+// Larger blocks go straight to the system on V8 builds without the sandbox (with
+// it, they have to live inside the sandbox). Those builds load PartitionAlloc,
+// which replaces malloc and ends the process when it can't serve a request, at
+// about 2 GiB and up. mmap() fails by returning an error, which V8 turns into a
+// RangeError, so a size that comes from input can't take the process down.
 class RecyclingAllocator : public ArrayBuffer::Allocator {
 public:
     RecyclingAllocator() : inner_(ArrayBuffer::Allocator::NewDefaultAllocator()) {}
 
     void* Allocate(size_t length) override {
         int size_class = ClassOf(length);
-        if (size_class < 0) return inner_->Allocate(length);
+        if (size_class < 0) return AllocateUnpooled(length, true);
         void* block = Take(size_class);
         if (block != nullptr) {
             memset(block, 0, length);
@@ -37,7 +47,7 @@ public:
 
     void* AllocateUninitialized(size_t length) override {
         int size_class = ClassOf(length);
-        if (size_class < 0) return inner_->AllocateUninitialized(length);
+        if (size_class < 0) return AllocateUnpooled(length, false);
         void* block = Take(size_class);
         return block != nullptr ? block : inner_->AllocateUninitialized(BlockSize(size_class));
     }
@@ -45,7 +55,7 @@ public:
     void Free(void* data, size_t length) override {
         int size_class = ClassOf(length);
         if (size_class < 0) {
-            inner_->Free(data, length);
+            FreeUnpooled(data, length);
             return;
         }
         {
@@ -70,6 +80,34 @@ private:
     static constexpr size_t kMinBlock = 512;
     static constexpr int kClasses = 12;
     static constexpr size_t kMaxCachedBytes = 64 * 1024 * 1024;
+
+    void* AllocateUnpooled(size_t length, bool zeroed) {
+#ifndef V8_ENABLE_SANDBOX
+        if (length > 0) {
+            // Fresh anonymous pages are zero-filled, whichever was asked for
+            void* block = mmap(nullptr, RoundToPages(length), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+            return block == MAP_FAILED ? nullptr : block;
+        }
+#endif
+        return zeroed ? inner_->Allocate(length) : inner_->AllocateUninitialized(length);
+    }
+
+    void FreeUnpooled(void* data, size_t length) {
+#ifndef V8_ENABLE_SANDBOX
+        if (length > 0) {
+            munmap(data, RoundToPages(length));
+            return;
+        }
+#endif
+        inner_->Free(data, length);
+    }
+
+#ifndef V8_ENABLE_SANDBOX
+    static size_t RoundToPages(size_t length) {
+        const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+        return (length + page - 1) / page * page;
+    }
+#endif
 
     static size_t BlockSize(int size_class) {
         return kMinBlock << size_class;
