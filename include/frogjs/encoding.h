@@ -20,8 +20,14 @@ bool GetEncodingArg(v8::Isolate* isolate, v8::Local<v8::Value> value, Encoding f
 // characters outside the alphabet, like Node.js.
 std::string DecodeString(v8::Isolate* isolate, v8::Local<v8::String> str, Encoding encoding);
 
-// Bytes -> string
-v8::Local<v8::String> EncodeBytes(v8::Isolate* isolate, const char* data, size_t length, Encoding encoding);
+// For hex and base64 only: decode straight into a buffer of at least
+// MaxDecodedLength() bytes. Returns the bytes written.
+size_t MaxDecodedLength(size_t string_length, Encoding encoding);
+size_t DecodeInto(v8::Isolate* isolate, v8::Local<v8::String> str, Encoding encoding, char* out);
+
+// Bytes -> string. Throws ERR_STRING_TOO_LONG and returns empty if the result
+// would exceed V8's maximum string length.
+v8::MaybeLocal<v8::String> EncodeBytes(v8::Isolate* isolate, const char* data, size_t length, Encoding encoding);
 
 // The bytes of a Buffer, TypedArray, DataView or ArrayBuffer (copied into *out).
 // Returns false for any other value.

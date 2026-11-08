@@ -1,5 +1,6 @@
 // TCP Client Example
 const client = net.connect(8080, '127.0.0.1');
+client.setEncoding('utf8');
 
 client.on('connect', () => {
     console.log('Connected to server');

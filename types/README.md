@@ -1,15 +1,12 @@
 # FrogJS type definitions
 
-TypeScript declarations for the FrogJS globals (`console`, `process`, `Buffer`, timers, `require`, `__dirname`, ...) and its built-in modules: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`, `child_process`, `worker_threads`.
+TypeScript declarations for the FrogJS globals (`console`, `process`, `Buffer`, timers, `require`, `__dirname`, ...) and its built-in modules: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`, `child_process`, `worker_threads`, `buffer`.
 
-They describe what FrogJS implements, not Node.js. Where the two differ the types follow FrogJS, so the compiler catches code that would fail at run time. For example:
-- `fs` callbacks and the `*Sync` functions report errors as strings, and file contents are always strings.
-- `fs.Stats.isFile` and `isDirectory` are booleans, not methods.
-- Buffers can't be indexed (`buf[0]`).
-- net sockets are not streams.
-- `setTimeout` needs a delay.
+They describe what FrogJS implements, not all of Node.js: an API FrogJS lacks isn't declared, so the compiler catches code that would fail at run time.
 
 ## Use them
+
+TypeScript 5.7 or newer is needed (`Uint8Array` became generic there).
 
 FrogJS runs JavaScript, so TypeScript code has to be compiled first: use CommonJS output. You can also type-check plain JavaScript with `checkJs`.
 
@@ -32,11 +29,11 @@ FrogJS runs JavaScript, so TypeScript code has to be compiled first: use CommonJ
 import fs = require('fs');
 import { spawn } from 'child_process';
 
-const config: string = fs.readFileSync('config.json');
+const config: string = fs.readFileSync('config.json', 'utf8');
 spawn('ls', ['-l']).stdout.pipe(process.stdout);
 ```
 
-Run the result with `frogjs dist/main.js`. FrogJS exposes no ES modules (`import ... from` compiled to CommonJS works, native `import` doesn't). `module.exports`/`exports` exist in files loaded with `require()`, but not in the main script, so compile the main file to a script that only `require()`s the others.
+Run the result with `frogjs dist/main.js`. FrogJS has no ES modules (`import ... from` compiled to CommonJS works, native `import` doesn't).
 
 ## Keeping them correct
 

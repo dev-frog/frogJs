@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -12,8 +13,12 @@
 #include <v8.h>
 #include <libplatform/libplatform.h>
 #include <uv.h>
+#include "frogjs/allocator.h"
+#include "frogjs/buffer.h"
+#include "frogjs/coverage.h"
 #include "frogjs/errors.h"
 #include "frogjs/loop.h"
+#include "frogjs/process.h"
 #include "frogjs/repl.h"
 #include "frogjs/runtime.h"
 #include "frogjs/util.h"
@@ -39,6 +44,7 @@ void SetupUtil(Isolate* isolate, Local<Context> context);
 void SetupCrypto(Isolate* isolate, Local<Context> context);
 void SetupChildProcess(Isolate* isolate, Local<Context> context);
 void SetupWorkerThreads(Isolate* isolate, Local<Context> context);
+void SetupProcessModule(Isolate* isolate, Local<Context> context);
 void SetupModules(Isolate* isolate, Local<Context> context, const std::string& mainFilePath);
 
 // Exit code for invalid command-line usage (same as Node.js)
@@ -209,15 +215,18 @@ bool ExecuteScript(Isolate* isolate, Local<Context> context, const std::string& 
 
     Local<Script> script;
     if (!Script::Compile(context, source, &origin).ToLocal(&script)) {
-        frogjs::ReportException(isolate, &try_catch);
-        return false;
+        if (check_only) {
+            frogjs::ReportException(isolate, &try_catch);
+            return false;
+        }
+        return frogjs::HandleUncaught(isolate, &try_catch);
     }
     if (check_only) return true;
 
     Local<Value> result;
     if (!script->Run(context).ToLocal(&result)) {
-        if (try_catch.HasCaught()) frogjs::ReportException(isolate, &try_catch);
-        return false;
+        // True if an 'uncaughtException' listener took it (the program goes on)
+        return try_catch.HasCaught() && frogjs::HandleUncaught(isolate, &try_catch);
     }
 
     // Printed the way console.log would: strings as-is, anything else inspected
@@ -237,9 +246,11 @@ bool ExecuteScript(Isolate* isolate, Local<Context> context, const std::string& 
 }
 
 void RunEventLoop(Isolate* isolate) {
-    while (uv_run(Loop(), UV_RUN_DEFAULT)) {
-        // Process V8 microtasks (Promises)
-        isolate->PerformMicrotaskCheckpoint();
+    uv_loop_t* loop = Loop();
+    DrainTasks(isolate);
+    while (uv_loop_alive(loop)) {
+        uv_run(loop, UV_RUN_ONCE);
+        DrainTasks(isolate);
     }
 }
 
@@ -314,22 +325,24 @@ Local<Context> CreateContext(Isolate* isolate, const std::vector<std::string>& a
     EscapableHandleScope handle_scope(isolate);
     Local<Context> context = Context::New(isolate);
     Context::Scope context_scope(context);
+    frogjs::EnableCoverage(isolate, context);
 
     SetupConsole(isolate, context);
     SetupUtil(isolate, context);
     SetupProcess(isolate, context, argv, exec_argv);
     SetupBuffer(isolate, context);
     SetupTimers(isolate, context);
-    SetupFileSystem(isolate, context);
-    SetupNet(isolate, context);
     SetupEvents(isolate, context);
     SetupStream(isolate, context);
+    SetupFileSystem(isolate, context);
+    SetupNet(isolate, context);
     SetupHTTP(isolate, context);
     SetupCrypto(isolate, context);
     SetupPath(isolate, context);
     SetupOS(isolate, context);
     SetupChildProcess(isolate, context);
     SetupWorkerThreads(isolate, context);
+    SetupProcessModule(isolate, context);
     SetupModules(isolate, context, main_filename);
 
     return handle_scope.Escape(context);
@@ -359,7 +372,10 @@ int main(int argc, char* argv[]) {
     // Work out what to run: --eval code, a script file, stdin, or nothing (REPL)
     std::string code;
     bool has_code = true;
-    g_process_argv.push_back(argv[0]);
+    // process.argv[0] and [1] are absolute paths, as in Node.js
+    char exec_path[PATH_MAX];
+    size_t exec_size = sizeof(exec_path);
+    g_process_argv.push_back(uv_exepath(exec_path, &exec_size) == 0 ? exec_path : argv[0]);
     if (opts.eval) {
         code = opts.eval_code;
         g_main_filename = "[eval]";
@@ -370,7 +386,8 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         g_main_filename = opts.script;
-        g_process_argv.push_back(opts.script);
+        char resolved[PATH_MAX];
+        g_process_argv.push_back(realpath(opts.script.c_str(), resolved) != nullptr ? resolved : opts.script);
     } else if (opts.script == "-" || !isatty(STDIN_FILENO)) {
         if (opts.script == "-") g_process_argv.push_back("-");
         if (opts.script == "-" || !opts.interactive) {
@@ -403,7 +420,7 @@ int main(int argc, char* argv[]) {
 
     // Create a new Isolate and make it the current one
     Isolate::CreateParams create_params;
-    create_params.array_buffer_allocator = ArrayBuffer::Allocator::NewDefaultAllocator();
+    create_params.array_buffer_allocator = frogjs::ArrayBufferAllocator();
     Isolate* isolate = Isolate::New(create_params);
 
     int exit_code = 0;
@@ -414,30 +431,60 @@ int main(int argc, char* argv[]) {
         // Create a new context with the built-in bindings
         Local<Context> context = CreateMainContext(isolate);
         Context::Scope context_scope(context);
+        frogjs::TrackPromiseRejections(isolate);
 
         // Like Node.js, an uncaught error in the main script ends the process
         // without running the event loop
-        if (has_code && !frogjs::ExecuteScript(isolate, context, code, g_main_filename, opts.print, opts.check)) {
+        bool ok = true;
+        if (has_code) {
+            if (opts.script.empty() || opts.script == "-" || opts.check) {
+                ok = frogjs::ExecuteScript(isolate, context, code, g_main_filename, opts.print, opts.check);
+            } else {
+                ok = frogjs::RunMainModule(isolate, context, g_main_filename);
+            }
+        }
+        if (!ok) {
             exit_code = 1;
         } else if (start_repl) {
             exit_code = frogjs::StartREPL(isolate, context, CreateMainContext);
         } else if (!opts.check) {
-            // Run the event loop to handle async operations
-            frogjs::RunEventLoop(isolate);
+            // Run the event loop until nothing is left, giving 'beforeExit'
+            // listeners the chance to schedule more work
+            do {
+                frogjs::RunEventLoop(isolate);
+                TryCatch try_catch(isolate);
+                Local<Value> argv[1] = {Integer::New(isolate, 0)};
+                frogjs::EmitProcessEvent(isolate, context, "beforeExit", 1, argv);
+                if (try_catch.HasCaught()) frogjs::HandleUncaught(isolate, &try_catch);
+                frogjs::DrainTasks(isolate);
+            } while (uv_loop_alive(uv_default_loop()));
         }
+        if (ok) exit_code = frogjs::FinishProcess(isolate, context, exit_code);
+        frogjs::WriteCoverage(isolate);
 
         // Unref'd workers may still be running: stop them before V8 goes away
         frogjs::TerminateAllWorkers();
+
+        // Release what the loop still holds (unref'd handles), with the isolate alive
+        frogjs::RunThreadCleanups();
+        uv_walk(uv_default_loop(), [](uv_handle_t* handle, void*) {
+            if (!uv_is_closing(handle)) uv_close(handle, nullptr);
+        }, nullptr);
+        uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+        frogjs::ResetModuleState();
+        frogjs::ResetProcessState();
+        frogjs::ClearPromiseRejections();
+        ResetBufferState();
     }
 
     // Dispose the isolate and tear down V8
     isolate->Dispose();
     V8::Dispose();
     V8::DisposePlatform();
-    delete create_params.array_buffer_allocator;
 
     // Close the event loop
     uv_loop_close(uv_default_loop());
+    fflush(stdout);
 
     return exit_code;
 }

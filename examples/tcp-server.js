@@ -1,5 +1,6 @@
 // TCP Server Example
 const server = net.createServer((socket) => {
+    socket.setEncoding('utf8');
     console.log('Client connected');
 
     socket.on('data', (data) => {

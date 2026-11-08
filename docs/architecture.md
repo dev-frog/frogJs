@@ -1,6 +1,6 @@
 # FrogJS Architecture
 
-FrogJS is a JavaScript runtime in the mould of Node.js: **V8** runs the JavaScript, **libuv** provides the event loop, I/O and threads, and about 14,000 lines of C++ (half of it JavaScript embedded in C++ files) connect the two and implement the built-in modules. It has no other dependencies: hashing, HTTP parsing and `util.inspect` are all part of the runtime.
+FrogJS is a JavaScript runtime in the mould of Node.js: **V8** runs the JavaScript, **libuv** provides the event loop, I/O and threads, and about 15,000 lines of C++ (half of it JavaScript embedded in C++ files) connect the two and implement the built-in modules. It has no other dependencies: hashing, HTTP parsing and `util.inspect` are all part of the runtime.
 
 This document explains how the pieces fit together. For conventions see the [style guide](style-guide.md); for the API see the [API reference](api-reference.md).
 
@@ -26,13 +26,12 @@ This document explains how the pieces fit together. For conventions see the [sty
 │ require('fs' | './lib/x')                   what it can call       │
 ├────────────────────────────────────────────────────────────────────┤
 │ JavaScript layer (embedded in the C++ files)                       │
-│   events · stream · http · util · crypto · child_process ·         │
-│   worker_threads · process.stdout                                  │
+│   buffer · timers · events · stream · fs · net · http · path · util │
+│   crypto · child_process · worker_threads · process · require()    │
 ├────────────────────────────────────────────────────────────────────┤
 │ Native bindings (C++)                                              │
-│   console · process · Buffer · timers · fs · net · path · os ·     │
-│   require() · native helpers of the JS modules (hashing, pipes,    │
-│   processes, message ports, ...)                                   │
+│   console · os · native helpers of the JS modules: file operations,│
+│   TCP handles, timers, hashing, encodings, pipes, processes, ports │
 ├──────────────────────────────┬─────────────────────────────────────┤
 │ V8: isolates, contexts,      │ libuv: event loop, timers, TCP,     │
 │ handles, ValueSerializer     │ pipes, processes, fs and thread     │
@@ -50,20 +49,25 @@ src/core/
   repl.cpp           the REPL, on top of the event loop
   line_editor.cpp    line editing, history and completion for the REPL
 src/bindings/        one file per module, each with a Setup<Name>() function
-  process.cpp  buffer.cpp  timers.cpp  fs.cpp  net.cpp  path.cpp  os.cpp  modules.cpp (require)
-  events.cpp  stream.cpp  http.cpp  util.cpp                 (mostly embedded JavaScript)
-  crypto.cpp  child_process.cpp  worker_threads.cpp           (embedded JavaScript + native helpers)
+  os.cpp                                                      (native)
+  events.cpp  stream.cpp  http.cpp  path.cpp  util.cpp        (mostly embedded JavaScript)
+  buffer.cpp  timers.cpp  fs.cpp  net.cpp  process.cpp  modules.cpp  crypto.cpp
+  child_process.cpp  worker_threads.cpp                       (embedded JavaScript + native helpers)
 src/utils/
   js_module.cpp      RunJsModule(): runs an embedded module
-  errors.cpp         ReportException(): Node.js-style uncaught error reports
+  errors.cpp         HandleUncaught(), MakeCallback(), rejection tracking, UVException()
+  allocator.cpp      the ArrayBuffer allocator shared by all threads
+  coverage.cpp       JavaScript coverage for `make coverage`
   encoding.cpp       hex / base64 / latin1 / ... shared by Buffer and crypto
   hash.cpp           MD5, SHA-1, SHA-2, HMAC, PBKDF2
 include/frogjs/      headers shared between files (all in namespace frogjs)
-  runtime.h  loop.h  worker.h  errors.h  js_module.h  util.h  buffer.h  encoding.h  hash.h
+  runtime.h  loop.h  worker.h  errors.h  process.h  js_module.h  util.h  buffer.h  encoding.h  hash.h
+  allocator.h  coverage.h
   repl.h  line_editor.h  v8_compat.h  version.h
 types/               TypeScript declarations of the API (see types/README.md)
-examples/            examples and the self-tests (test-*.js)
-tools/               development scripts (check-types.js)
+examples/            examples and the self-tests (test-*.js, lib/check.js)
+benchmark/           benchmarks against Node.js (make bench)
+tools/               check-types.js, check-docs.js, coverage.py, leakcheck.sh, fuzz.js
 ```
 
 ## Startup
@@ -74,17 +78,19 @@ main()
   ├── pick the source         --eval code │ script file │ stdin │ nothing → REPL
   ├── V8::InitializePlatform(), V8::Initialize(), Isolate::New()
   ├── CreateContext()         a context with every built-in installed (below)
-  ├── ExecuteScript()         compile + run; an uncaught error is reported → exit code 1
-  ├── RunEventLoop()          uv_run() until no handle keeps the loop alive (or StartREPL())
+  ├── RunMainModule()         a file: load it as a module (ExecuteScript() for -e and stdin)
+  ├── RunEventLoop()          until no handle keeps the loop alive, with 'beforeExit' (or StartREPL())
+  ├── FinishProcess()         'exit' listeners; the exit code
   ├── TerminateAllWorkers()   stop and join workers that are still running (unref'd)
+  ├── RunThreadCleanups()     close what is left (unref'd handles, digests), drain the loop
   └── dispose the isolate, V8 and the loop
 ```
 
 `frogjs::CreateContext()` (`include/frogjs/runtime.h`) installs the built-ins in dependency order: each later one can use the earlier ones through the global object.
 
 ```
-console → util → process → Buffer → timers → fs → net → events → stream (+ process.stdout/stderr)
-        → http → crypto → path → os → child_process → worker_threads → require()/__filename/module
+console → util → process → Buffer → timers → events → stream (+ process.stdout/stderr) → fs → net
+        → http → crypto → path → os → child_process → worker_threads → process (JavaScript half) → require()
 ```
 
 The REPL's `.clear` and every worker thread call the same function, so all contexts are built the same way.
@@ -95,9 +101,9 @@ Each `src/bindings/<name>.cpp` exposes `void Setup<Name>(Isolate*, Local<Context
 
 There are two kinds:
 
-**Native modules** (`fs`, `net`, `path`, `os`, `timers`, `Buffer`, `process`) are C++ functions set as properties of an object. For example `fs.readFile()` starts a `uv_fs_*` request, and its completion callback calls the JavaScript callback.
+**Native modules** (`os`, and `console`) are C++ functions set as properties of an object.
 
-**Embedded JavaScript modules** (`events`, `stream`, `http`, `util`, `crypto`, `child_process`, `worker_threads`) are JavaScript in a C++ raw string. The source is one function expression; `frogjs::RunJsModule()` (`src/utils/js_module.cpp`) compiles it as `frogjs:<name>` (the name in stack traces) and calls it with the module's dependencies. Its return value is the module.
+**Embedded JavaScript modules** (all the others) are JavaScript in a C++ raw string. The source is one function expression; `frogjs::RunJsModule()` (`src/utils/js_module.cpp`) compiles it as `frogjs:<name>` (the name in stack traces) and calls it with the module's dependencies. Its return value is the module.
 
 ```cpp
 static const char* kCryptoSource = R"JS(
@@ -122,9 +128,16 @@ Logic that is natural in JavaScript (argument checks, Node.js-compatible errors,
 
 | Module | Native part | JavaScript part |
 |--------|-------------|-----------------|
+| `Buffer` | encodings, `decodeInto`, `utf8Write` | the `Uint8Array` subclass, a shared pool, binary reads and writes |
+| timers | one `uv_timer_t` per timeout, a check/idle pair for immediates | `Timeout`, `Immediate`, argument checks |
+| `fs` | one function per operation, run inline or on the thread pool | argument checks, `Stats`, `Dirent`, streams, `fs.promises` |
+| `net` | a TCP handle: connect, listen, read, try-write, shutdown, lookup | `Socket` (a Duplex), `Server`, address fallback, errors |
+| `path` | none | POSIX path functions |
+| `process` | exit, signals, clocks, memory | EventEmitter, `exit()`, `nextTick`, `stdin`; also defines `queueMicrotask`, `performance`, `TextEncoder`, ... |
+| `require` | `compile`, `realpath` | the loader: resolution, cache, `node_modules` |
 | `events` | none | `EventEmitter` |
 | `stream` | byte-string helpers | `Readable`, `Writable`, `Duplex`, `Transform`, `pipeline`, ... |
-| `http` | none; it uses `net` | HTTP/1.1 parser and serializer, `Server`, `IncomingMessage`, `ClientRequest`, ... |
+| `http` | none; it uses `net` | HTTP/1.1 parser and serializer, `Server`, `IncomingMessage`, `ClientRequest`, limits and timeouts, ... |
 | `util` | Proxy/Promise/boxed-value inspection | `inspect`, `format`, `promisify` |
 | `crypto` | `hash.cpp` digests, `uv_random`, PBKDF2 on the thread pool | `Hash`/`Hmac` streams, validation |
 | `child_process` | `uv_spawn`, pipes, a private loop for `spawnSync` | `ChildProcess`, stdio streams, `exec`, `execSync`, ... |
@@ -137,51 +150,62 @@ C++ code calls back into embedded JavaScript too: `console.log` formats with `ut
 `frogjs::RunEventLoop()` runs the thread's libuv loop until no active, referenced handle or request remains:
 
 ```cpp
-while (uv_run(frogjs::Loop(), UV_RUN_DEFAULT)) {
-    isolate->PerformMicrotaskCheckpoint();
+DrainTasks(isolate);
+while (uv_loop_alive(loop)) {
+    uv_run(loop, UV_RUN_ONCE);
+    DrainTasks(isolate);   // microtasks, then rejections still unhandled
 }
 ```
 
-Promise jobs (microtasks) run automatically when a callback into JavaScript returns, so `.then()` callbacks run between libuv callbacks. FrogJS has no `process.nextTick`: the embedded modules defer work with `Promise.resolve().then(...)`.
+Promise jobs (microtasks) run automatically when a callback into JavaScript returns. `process.nextTick` and the `nextTick` inside `stream` drain their queues from a single microtask, so a burst of stream events doesn't allocate a promise each. Ticks and promise reactions share one queue, a difference from Node.js noted in the API reference.
 
 Every asynchronous operation follows the same path:
 
 ```
-JavaScript call → binding starts a libuv request or handle, keeps the callback in a Persistent → returns
+JavaScript call → binding starts a libuv request or handle, keeps the callback in a Global → returns
                                      ⋮
-libuv completion on the loop thread → C++ callback: HandleScope, Context::Scope, TryCatch
-                                     → call the JavaScript callback → ReportException() if it threw
+libuv completion on the loop thread → C++ callback: HandleScope
+                                     → frogjs::MakeCallback(): call JavaScript in a TryCatch
+                                     → an exception goes to HandleUncaught()
 ```
 
-A handle that keeps the process alive is `uv_ref`'d; `unref()` (timers, child processes, workers, message ports) makes it stop counting. Work that would block runs on the libuv thread pool: `fs` requests, `pbkdf2`, async `randomBytes`.
+A handle that keeps the process alive is `uv_ref`'d; `unref()` (timers, sockets, servers, child processes, workers, message ports) makes it stop counting. Work that would block runs on the libuv thread pool: `fs` requests, `pbkdf2`, async `randomBytes`, DNS.
+
+### Writes and reads
+
+`net` tries `uv_try_write()` first: most writes fit in the kernel's buffer, with no copy and no request. What doesn't fit is copied into a queued request whose completion calls the `Writable`'s callback, which is what makes `write()` return `false` and `'drain'` fire. Reads stop when `Readable.push()` returns `false` and start again from `_read()`, so a slow consumer slows the sender.
 
 ## Module loading
 
-`require()` (`src/bindings/modules.cpp`):
+The loader is JavaScript in `src/bindings/modules.cpp`. Native code only compiles a module wrapper and resolves real paths.
 
 ```
 require(id)
-  ├── a built-in name? → the global of that name
-  ├── resolve from the requiring module's directory (the main script's for the main script):
-  │     exact path → path.js → path/index.js
-  ├── in the cache? → cached exports
-  ├── wrap: (function (exports, require, module, __filename, __dirname) { ... })
+  ├── a built-in name (or node:name)? → the object captured at startup, so replacing a global can't break it
+  ├── a path? → exact file → .js → .json → directory (package.json main → index.js → index.json)
+  ├── else: each node_modules up the tree, honoring package.json exports
+  ├── in the cache? → its current exports (partial, for a circular require)
+  ├── new Module, in the cache before it runs
+  ├── .json: parse. Anything else: wrap in (function (exports, require, module, __filename, __dirname) { ... })
   │     (compiled with a line offset of -1, so error lines match the file)
-  ├── run it with a require() bound to the module's own directory
-  └── cache module.exports (any value) and return it
+  └── on an exception: remove it from the cache, so requiring it again runs it again
 ```
 
-The main script is not wrapped: it runs as a plain script, with globals `__filename` and `__dirname` (absolute paths) and `module`/`exports`. That is why TypeScript's CommonJS output runs as the entry point. A module is cached only after it finishes running, so circular `require()`s load the module again instead of returning its partial exports. Packages (`node_modules`, `package.json`) and ES modules are not supported.
+A file given on the command line is a module too (`RunMainModule()`). `-e` code, stdin and the REPL run as plain scripts, with `module`, `exports`, `__filename` and `__dirname` as globals. ES modules are not supported.
 
 ## Errors
 
-`frogjs::ReportException()` (`src/utils/errors.cpp`) prints an uncaught error the way Node.js does: `file:line`, the source line with a caret, then the value through `util.inspect` (the stack plus properties such as `code`). It is used for:
-- the main script: the report is printed and the process exits with code 1 without running the event loop;
-- callbacks from the event loop (timers, fs, sockets, streams): the report is printed and the process keeps running;
-- worker threads: the error is sent to the parent instead (see below);
-- termination (`process.exit()` in a worker, `worker.terminate()`, Ctrl+C in the REPL): ignored, since it isn't an error.
+Everything uncaught goes through `frogjs::HandleUncaught()` (`src/utils/errors.cpp`), whether from the main script, a callback through `MakeCallback()`, or a rejection:
 
-Errors thrown to JavaScript match Node.js's: the same class, `code` and message (`TypeError [ERR_INVALID_ARG_TYPE]: The "file" argument must be ...`). The self-tests check this by running under both runtimes.
+1. Termination (`process.exit()` in a worker, `worker.terminate()`, Ctrl+C in the REPL) is ignored.
+2. On a worker thread, the error is sent to the parent as an `'error'` event, and the worker ends.
+3. `process.on('uncaughtException')` listeners get it, and the program goes on. A listener that throws gives exit code 7.
+4. In the REPL it is printed and the session goes on.
+5. Otherwise it is printed the way Node.js does (`file:line`, the source line with a caret, the value through `util.inspect`), `'exit'` is emitted, and the process exits with code 1.
+
+**Rejections.** `TrackPromiseRejections()` installs V8's reject callback. A promise rejected without a handler goes on a list, and one that gets a handler comes off it. `DrainTasks()`, after each loop iteration, reports what is left: to `'unhandledRejection'` listeners, or as an uncaught exception.
+
+Errors thrown to JavaScript match Node.js's: the same class, `code` and message (`ERR_INVALID_ARG_TYPE`, `ENOENT`, ...). `frogjs::UVException()` builds the file system ones; `net` builds its own in JavaScript (`connect ECONNREFUSED 127.0.0.1:80`). The self-tests check this by running under both runtimes.
 
 ## Threads
 
@@ -238,29 +262,34 @@ StartREPL()
 
 ## Memory management
 
-- **V8 handles.** `Local` handles live in a `HandleScope`. A value kept across callbacks is a `Persistent`/`Global` and is reset when its owner goes away. Handle objects whose native part should die with them use weak callbacks (crypto digests, message ports nobody listens to).
+- **V8 handles.** `Local` handles live in a `HandleScope`. A value kept across callbacks is a `Global` and is reset when its owner goes away. Handle objects whose native part should die with them use weak callbacks (crypto digests, message ports nobody listens to).
+- **Buffers.** A `Buffer` is a `Uint8Array` over an `ArrayBuffer`, so V8 owns the bytes, frees them with the last view, and counts them as external memory for GC decisions. Bounds checks and `this` checks come with it.
+- **The allocator.** `frogjs::ArrayBufferAllocator()` is one per process and never destroyed, because a `SharedArrayBuffer` or transferred buffer can outlive the thread that allocated it. It recycles blocks of 512 B to 1 MB by size class, up to 64 MB, because V8's default allocator is slow when V8 is built with its sandbox. A reused block is zeroed unless the caller asked for uninitialized memory, which only `NewBuffer()` does, and it fills the block at once.
+- **The Buffer pool.** Small Buffers from `from()`, `concat()` and `allocUnsafe()` are carved from an 8 KB block in JavaScript. A block is zero-filled and each byte is handed out once, so new Buffers never show old data.
 - **libuv.** A handle's memory is freed in its `uv_close()` callback. Request structs (`uv_fs_t`, `uv_write_t`, ...) are heap-allocated and freed in their completion callback.
-- **Threads.** `Persistent`s in `thread_local` variables are never reset at thread exit (their isolate is gone by then). A worker resets the ones that matter before disposing its isolate.
-- **Known leak.** Buffer memory is never freed: `BufferFinalizer` is a no-op. This is the main item on the memory to-do list (see ROADMAP).
+- **Thread end.** Weak callbacks don't run when an isolate is disposed, and unref'd handles are still open. Bindings register with `frogjs::AddThreadCleanup()`, and `RunThreadCleanups()` releases all of it before the loop and isolate go away, on the main thread and in workers. `make leakcheck` verifies this.
 
 ## Build, tests and tooling
 
-- **Build.** The `Makefile` compiles each `.cpp` with `-std=c++20 -Wall -Wextra` and links V8 and libuv. `-MMD` records header dependencies, so a changed header rebuilds its users. `hash.cpp` is built with `-O2`, and `worker_threads.cpp` with `-fno-rtti` (it subclasses V8's serializer delegates, and libv8 has no RTTI). The V8 sandbox defines are detected from the library's symbols.
-- **Tests.** `make test` runs the self-tests (`examples/test-*.js`, which also pass under Node.js) and `examples/test-cli.sh`.
+- **Build.** The `Makefile` compiles each `.cpp` with `-std=c++20 -O2 -Wall -Wextra` into `build/obj/` and links V8 and libuv, found through Homebrew or `V8_PATH`/`LIBUV_PATH`. `-MMD` records header dependencies. Files that subclass V8 classes use `-fno-rtti`, because libv8 has no RTTI. The V8 sandbox defines are detected from the library's symbols. Instrumented builds go in their own directories (`build/asan`, `build/coverage`).
+- **Tests.** `make test` runs the self-tests (`examples/test-*.js`, most of which also pass under Node.js), `examples/test-cli.sh`, and `examples/test-repl.py` on a real terminal. A test passes only if it exits with 0 *and* its last line says `0 failed`, so a test that ends early fails.
+- **Memory.** `make test-asan` runs the tests under AddressSanitizer and UndefinedBehaviorSanitizer; `make leakcheck` runs a workload under macOS's `leaks`; `test-memory.js` checks that long-running work doesn't grow the process.
+- **Fuzzing.** `make fuzz` sends mutated HTTP over real sockets and random arguments to Buffer, on the sanitizer build.
+- **Coverage.** `make coverage` combines `llvm-cov` for the C++ with V8's precise coverage for the embedded JavaScript (`src/utils/coverage.cpp`, through the inspector protocol, only compiled into the coverage build).
+- **Benchmarks.** `make bench` compares with Node.js; see [performance](performance.md).
 - **Lint.** `make lint` runs ESLint on the examples, the tools and the embedded JavaScript, using a processor in `eslint.config.js` that extracts every `R"JS(...)JS"` block. It also compiles every C++ file with `-Werror`. `.clang-format` defines the C++ format; `make format` applies it to changed lines.
-- **Types.** `types/*.d.ts` declares the API. `make check-types` type-checks `types/test`, runs the compiled test in FrogJS, and runs `tools/check-types.js`, which compares every declared export and method with the running runtime.
-- **CI.** `.github/workflows/build.yml` builds with `WERROR=1` on macOS and runs test, lint and check-types.
+- **Types and docs.** `types/*.d.ts` declares the API. `make check-types` type-checks `types/test`, runs the compiled test in FrogJS, and compares every declared export and method with the running runtime. `make check-docs` checks that each of them is in the API reference.
+- **CI.** `.github/workflows/build.yml` runs all of this on macOS.
 
 ## Known limitations
 
-These shape the design today; see ROADMAP for plans.
-- No packages (`node_modules`), no ES modules, no `process.nextTick`/`setImmediate`, no `process.stdin` stream.
-- `fs` works on UTF-8 strings and reports errors as strings, and its API is a subset.
-- `net` sockets are not streams and don't report backpressure.
-- Buffers are not `Uint8Array`s and are never freed.
-- No HTTPS/TLS, no IPC between processes.
-- No sandboxing or permission model: scripts have full access to the file system, network and processes.
+See the [roadmap](../ROADMAP.md) for what may come.
+- No ES modules, TLS/HTTPS, ciphers, signatures, IPC between processes, global `URL`, or `fetch`.
+- `process.nextTick` shares the microtask queue with promises.
+- `process.env` is a plain object: changing it doesn't call `setenv()`, though child processes get its current content.
+- `fs` paths are UTF-8 strings; there is no `encoding` option for names.
+- No sandboxing or permission model: scripts have full access to the file system, network and processes. See the [threat model](../SECURITY.md#threat-model).
 
 ---
 
-**Architecture version:** 0.9.0
+**Architecture version:** 1.0.0

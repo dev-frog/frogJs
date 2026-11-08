@@ -1,4 +1,11 @@
 #include "frogjs/hash.h"
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#if !defined(__APPLE__)
+#include <asm/hwcap.h>
+#include <sys/auxv.h>
+#endif
+#endif
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -229,6 +236,42 @@ private:
 };
 
 // SHA-256, and SHA-224 (other initial values, output truncated to 7 words)
+#if defined(__aarch64__)
+
+// The ARMv8 SHA-2 instructions: several times faster than the portable code below
+__attribute__((target("sha2"))) void Sha256CompressArm(uint32_t* state, const uint8_t* block) {
+    uint32x4_t abcd = vld1q_u32(state);
+    uint32x4_t efgh = vld1q_u32(state + 4);
+    const uint32x4_t abcd_start = abcd;
+    const uint32x4_t efgh_start = efgh;
+
+    uint32x4_t m[4];
+    for (int i = 0; i < 4; i++) m[i] = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block + i * 16)));
+
+    for (int r = 0; r < 16; r++) {
+        const uint32x4_t wk = vaddq_u32(m[r % 4], vld1q_u32(&kSha256K[r * 4]));
+        const uint32x4_t previous = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, wk);
+        efgh = vsha256h2q_u32(efgh, previous, wk);
+        if (r < 12) {
+            m[r % 4] = vsha256su1q_u32(vsha256su0q_u32(m[r % 4], m[(r + 1) % 4]), m[(r + 2) % 4], m[(r + 3) % 4]);
+        }
+    }
+    vst1q_u32(state, vaddq_u32(abcd, abcd_start));
+    vst1q_u32(state + 4, vaddq_u32(efgh, efgh_start));
+}
+
+bool HasSha2Instructions() {
+#if defined(__APPLE__)
+    return true;  // every arm64 Mac has them
+#else
+    static const bool has = (getauxval(AT_HWCAP) & HWCAP_SHA2) != 0;
+    return has;
+#endif
+}
+
+#endif  // __aarch64__
+
 class Sha256 : public BlockHash<64, 8, true> {
 public:
     explicit Sha256(bool sha224) : words_(sha224 ? 7 : 8) {
@@ -239,6 +282,12 @@ public:
 
 protected:
     void Compress(const uint8_t* block) override {
+#if defined(__aarch64__)
+        if (HasSha2Instructions()) {
+            Sha256CompressArm(h_, block);
+            return;
+        }
+#endif
         uint32_t w[64];
         for (int i = 0; i < 16; i++) w[i] = LoadBE32(block + i * 4);
         for (int i = 16; i < 64; i++) {

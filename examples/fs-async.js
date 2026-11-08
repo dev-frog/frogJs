@@ -11,7 +11,7 @@ fs.writeFile("async-test.txt", "Async file content from FrogJS", (err) => {
 
     // Read the file asynchronously after writing
     console.log("Reading async-test.txt...");
-    fs.readFile("async-test.txt", (err, data) => {
+    fs.readFile("async-test.txt", "utf8", (err, data) => {
         if (err) {
             console.error("Error reading file:", err);
             return;

@@ -91,12 +91,10 @@ jobs:
       - name: Build FrogJS
         run: |
           make clean
-          make all \
-            V8_PATH="$(brew --prefix v8)" \
-            LIBUV_PATH="$(brew --prefix libuv)"
+          make all WERROR=1
 
-      - name: Smoke test
-        run: ./build/frogjs examples/hello.js
+      - name: Test
+        run: make test
 
       - name: Package
         id: package
@@ -106,7 +104,7 @@ jobs:
         run: |
           NAME="frogjs-${VERSION}-${TARGET}"
           mkdir -p "dist/$NAME"
-          cp build/frogjs README.md LICENSE "dist/$NAME/"
+          cp build/frogjs README.md LICENSE CHANGELOG.md "dist/$NAME/"
           tar -czf "dist/$NAME.tar.gz" -C dist "$NAME"
           (cd dist && shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
           ls -lh dist

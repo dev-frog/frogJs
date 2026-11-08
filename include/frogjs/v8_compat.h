@@ -52,4 +52,25 @@ inline void WriteTwoByte(v8::Isolate* isolate, v8::Local<S> str, uint16_t* buffe
     }
 }
 
+// Encode a string as UTF-8 into buffer, which must hold capacity bytes (no NUL
+// is added). Lone surrogates become U+FFFD. WriteUtf8V2 in 13.x, WriteUtf8 in 15.x.
+template <typename S = v8::String>
+inline size_t WriteUtf8(v8::Isolate* isolate, v8::Local<S> str, char* buffer, size_t capacity) {
+    if constexpr (requires { str->WriteUtf8V2(isolate, buffer, capacity, S::WriteFlags::kReplaceInvalidUtf8); }) {
+        return str->WriteUtf8V2(isolate, buffer, capacity, S::WriteFlags::kReplaceInvalidUtf8);
+    } else {
+        return str->WriteUtf8(isolate, buffer, capacity, S::WriteFlags::kReplaceInvalidUtf8);
+    }
+}
+
+// Length of a string in UTF-8 bytes (Utf8LengthV2 in 13.x, Utf8Length in 15.x)
+template <typename S = v8::String>
+inline size_t Utf8Length(v8::Isolate* isolate, v8::Local<S> str) {
+    if constexpr (requires { str->Utf8LengthV2(isolate); }) {
+        return str->Utf8LengthV2(isolate);
+    } else {
+        return str->Utf8Length(isolate);
+    }
+}
+
 }  // namespace frogjs

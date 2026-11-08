@@ -18,6 +18,14 @@ v8::Local<v8::Context> CreateContext(v8::Isolate* isolate, const std::vector<std
 bool ExecuteScript(v8::Isolate* isolate, v8::Local<v8::Context> context, const std::string& code,
                    const std::string& filename, bool print_result = false, bool check_only = false);
 
+// Load a file as the main module: wrapped like any module (top-level return,
+// its own scope), with require.main set. Uncaught errors are handled as in
+// ExecuteScript. Returns false if one ended the script.
+bool RunMainModule(v8::Isolate* isolate, v8::Local<v8::Context> context, const std::string& filename);
+
+// Forget the module cache (before the thread's isolate is disposed)
+void ResetModuleState();
+
 // Read a script file. Returns false and sets *error to why it can't be read.
 bool ReadScriptFile(const std::string& filename, std::string* out, std::string* error);
 

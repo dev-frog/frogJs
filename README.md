@@ -12,13 +12,13 @@
 
 - **V8 JavaScript Engine**: Fast ECMAScript execution with modern JavaScript support
 - **Event-Driven I/O**: Non-blocking operations powered by libuv
-- **Module System**: CommonJS-style `require()` with caching and relative path support
+- **Module System**: CommonJS `require()` following Node.js's algorithm: `node_modules`, `package.json` (`main`, `exports`), JSON, circular requires
 - **HTTP Server & Client**: Node-compatible `http` module (keep-alive, chunked encoding, pipelining)
 - **Events & Streams**: Node-compatible `EventEmitter` and `stream` module (Readable, Writable, Transform, pipe with backpressure)
-- **TCP Networking**: Built-in TCP server and client functionality
-- **File System**: Both sync and async file operations
-- **Timer API**: setTimeout, setInterval, clearTimeout, clearInterval
-- **Process & Buffer**: `process` object and `Buffer` class for binary data
+- **TCP Networking**: `net` sockets are Duplex streams with real backpressure; servers are EventEmitters
+- **File System**: Node-compatible `fs`: sync, callback and promise forms, read and write streams, `Error` objects with `code`
+- **Timers**: `setTimeout`, `setInterval`, `setImmediate`, `process.nextTick`, `queueMicrotask`, with `ref()`/`unref()`
+- **Process & Buffer**: `process` as an EventEmitter (`'exit'`, `'uncaughtException'`, signals, `stdin`); `Buffer` as a `Uint8Array` subclass
 - **Path & OS Utilities**: Node-compatible `path` and `os` modules
 - **REPL & CLI**: Interactive shell with history and tab completion, `--eval`/`--print`/`--check`, Node-style error reports
 - **Util**: `util.inspect` and `util.format` with the same output as Node.js (used by `console.log`)
@@ -39,10 +39,11 @@ Before building FrogJS, ensure you have the following dependencies:
 brew install v8 libuv
 ```
 
-### Linux (Ubuntu/Debian)
+### Linux
+Not tested for 1.0: see the [support policy](docs/support-policy.md#platforms). The code has no macOS-only parts outside `#if` branches, but needs a V8 you build or obtain yourself:
 ```bash
-# V8 requires building from source or using distro packages
 sudo apt-get install libuv1-dev
+make V8_PATH=/path/to/v8 LIBUV_PATH=/usr
 ```
 
 ### Build Requirements
@@ -84,11 +85,10 @@ make
 
 The executable will be created at `./build/frogjs`
 
-### Build (Linux)
-Update the Makefile paths to point to your V8 and libuv installations:
+### Build (other installs)
+The Makefile finds Homebrew's V8 and libuv. Otherwise, pass the install prefixes:
 ```bash
-# Edit Makefile with your paths
-make
+make V8_PATH=/path/to/v8 LIBUV_PATH=/path/to/libuv
 ```
 
 ---
@@ -110,7 +110,7 @@ Run it:
 Run `frogjs` with no script to start an interactive shell:
 ```
 $ ./build/frogjs
-Welcome to FrogJS v0.9.0.
+Welcome to FrogJS v1.0.0.
 Type ".help" for more information.
 > const server = { port: 3000, routes: ['/', '/api'] }
 undefined
@@ -137,7 +137,7 @@ frogjs -p "os.cpus().length"      # evaluate and print the result
 frogjs -c script.js               # syntax check only
 frogjs -i -e "var x = 1"          # run code, then start the REPL
 echo "console.log('hi')" | frogjs # read the script from stdin
-frogjs --version                  # v0.9.0
+frogjs --version                  # v1.0.0
 frogjs --help                     # all options
 ```
 
@@ -267,6 +267,8 @@ const server = net.createServer((socket) => {
     socket.on('end', () => {
         console.log('Client disconnected');
     });
+
+    socket.on('error', (err) => console.error(err.code));
 });
 
 server.listen(3000, () => {
@@ -278,14 +280,18 @@ server.listen(3000, () => {
 ```javascript
 const fs = require('fs');
 
-// Async read
-fs.readFile('example.txt', (err, data) => {
-    if (err) throw err;
+// Without an encoding you get a Buffer
+const bytes = fs.readFileSync('logo.png');
+const text = fs.readFileSync('notes.txt', 'utf8');
+
+fs.readFile('missing.txt', 'utf8', (err, data) => {
+    if (err) return console.error(err.code);  // 'ENOENT'
     console.log(data);
 });
 
-// Sync write
-fs.writeFileSync('output.txt', 'Hello, FrogJS!');
+// Promises and streams
+await fs.promises.writeFile('output.txt', 'Hello, FrogJS!');
+fs.createReadStream('big.log').pipe(fs.createWriteStream('copy.log'));
 ```
 
 ### Modules
@@ -332,13 +338,24 @@ Check out the `examples/` directory for more samples:
 - `examples/tcp-client.js` - TCP client implementation
 - `examples/modules/` - Module system examples
 - `examples/test-modules.js` - Module system self-test
-- `examples/test-path.js` - Path module usage
-- `examples/test-os.js` - OS module usage
+- `examples/test-buffer.js` - Buffer self-test
+- `examples/test-path.js` - Path module self-test
+- `examples/test-os.js` - OS module self-test
+- `examples/test-fs.js` - File system self-test
+- `examples/test-net.js` - TCP self-test
+- `examples/test-http-limits.js` - HTTP against hostile input
+- `examples/test-process.js` - Process and globals self-test
+- `examples/test-timers.js` - Timers self-test
+- `examples/test-module-loading.js` - Module loader self-test
+- `examples/test-errors.js` - Uncaught errors, rejections and exit codes
+- `examples/test-edges.js` - Argument errors in events, crypto and workers
+- `examples/test-memory.js` - Long-running work doesn't grow the process
 - `examples/test-util.js` - Util module self-test (`inspect`, `format`)
 - `examples/test-crypto.js` - Crypto module and Buffer encodings self-test
 - `examples/test-child-process.js` - Child process module self-test
 - `examples/test-worker-threads.js` - Worker threads self-test
-- `examples/test-cli.sh` - CLI and REPL self-test
+- `examples/test-cli.sh` - CLI self-test
+- `examples/test-repl.py` - REPL self-test on a real terminal
 
 Run examples:
 ```bash
@@ -399,44 +416,41 @@ frogjs/
 
 ## Current Status
 
+**1.0.0**: see the [changelog](CHANGELOG.md), and the [API stability](docs/api-stability.md) and [support](docs/support-policy.md) policies.
+
 ### Implemented
-- Core runtime with V8 integration
+- Core runtime with V8 integration; uncaught errors and unhandled rejections end the process with a report, as in Node.js
 - Console API (log, info, debug, error, warn) with `util.format` formatting
-- Timer API (setTimeout, setInterval, etc.)
-- File system operations (sync & async)
-- TCP server/client networking
-- HTTP server/client (http.createServer, http.request, http.get)
-- Events module (EventEmitter, events.once, events.on)
-- Streams (Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished)
-- Module system (require, exports, caching)
-- Error handling with stack traces and source excerpts
-- REPL (history, tab completion, multi-line input, commands)
-- CLI options (--eval, --print, --check, --interactive, --version, --help)
-- Util module (inspect, format, promisify, inherits, isDeepStrictEqual)
-- Crypto module (createHash, createHmac, pbkdf2, randomBytes, randomUUID, randomInt, getRandomValues, timingSafeEqual)
-- Child process module (spawn, exec, execFile, spawnSync, execSync, execFileSync)
-- Worker threads (Worker, parentPort, workerData, MessageChannel, SharedArrayBuffer)
-- process.stdout / process.stderr streams
-- Process object (argv, execArgv, env, exit, cwd, pid, platform, version, versions)
-- Buffer class for binary data
-- Additional FS operations (mkdir, rmdir, stat, readdir, unlink, existsSync)
-- Path module (join, resolve, normalize, dirname, basename, extname, isAbsolute)
-- OS module (platform, arch, cpus, hostname, release, type, totalmem, freemem, homedir, tmpdir)
-- TypeScript declarations for every built-in module (`types/`)
-- Tooling: `make test`, `make lint` (ESLint + `-Werror`), `make format` (clang-format), `make check-types`
-- Automated release builds via GitHub Actions
+- Timers: setTimeout, setInterval, setImmediate, process.nextTick, queueMicrotask, with ref/unref
+- File system: sync, callback and promise forms; read and write streams; descriptors; Error objects with `code`
+- TCP: Duplex sockets with backpressure, EventEmitter servers, DNS, timeouts
+- HTTP server/client: keep-alive, chunked encoding, pipelining, backpressure and request timeouts
+- Events (EventEmitter, events.once, events.on) and streams (Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished)
+- Module system: node_modules, package.json (main, exports), JSON, circular requires, require.resolve/cache/main
+- REPL (history, tab completion, multi-line input, commands) and CLI options
+- Util (inspect, format, promisify, inherits, isDeepStrictEqual)
+- Crypto (createHash, createHmac, pbkdf2, randomBytes, randomUUID, randomInt, getRandomValues, timingSafeEqual)
+- Child processes (spawn, exec, execFile, spawnSync, execSync, execFileSync)
+- Worker threads (Worker, parentPort, workerData, MessageChannel, SharedArrayBuffer), structuredClone
+- Process: EventEmitter with 'exit', 'uncaughtException', 'unhandledRejection' and signals; stdin/stdout/stderr streams; hrtime, memoryUsage, kill, ...
+- Buffer: a Uint8Array subclass with encodings and binary read/write methods
+- Path and OS modules; TextEncoder/TextDecoder; performance.now
+- TypeScript declarations for every built-in module (`types/`), checked against the runtime
+- Tooling: `make check`, `test-asan`, `leakcheck`, `coverage`, `bench`, `fuzz`
 
-### Planned
-- File streams (fs.createReadStream / fs.createWriteStream)
-- Packages (`node_modules`) and ES modules
-- Windows support
-
----
+### Not included
+ES modules, TLS/HTTPS, ciphers and signatures, `child_process.fork()` with IPC, a global `URL`, `fetch`, Windows. Possible later versions are in the [roadmap](ROADMAP.md).
 
 ## Documentation
 
 - **[FEATURES.md](FEATURES.md)** - Comprehensive feature documentation
 - **[docs/api-reference.md](docs/api-reference.md)** - API reference
+- **[CHANGELOG.md](CHANGELOG.md)** - What changed, and how to migrate to 1.0
+- **[docs/api-stability.md](docs/api-stability.md)** - What is stable and what can change
+- **[docs/support-policy.md](docs/support-policy.md)** - Supported versions and platforms
+- **[SECURITY.md](SECURITY.md)** - Reporting vulnerabilities, threat model
+- **[docs/security-audit.md](docs/security-audit.md)** - The 1.0 security review
+- **[docs/performance.md](docs/performance.md)** - Benchmarks against Node.js
 - **[docs/architecture.md](docs/architecture.md)** - How the runtime works
 - **[docs/contributing.md](docs/contributing.md)** - Contributing guide: setup, checks, tests
 - **[docs/style-guide.md](docs/style-guide.md)** - Formatting and coding conventions
@@ -456,22 +470,13 @@ make
 ./build/frogjs your-script.js
 ```
 
-### CMake Build (In Development)
-```bash
-mkdir -p build && cd build
-cmake ..
-make
-./frogjs your-script.js
-```
+`make DEBUG=1` builds without optimization for debugging. `CMakeLists.txt` is outdated and not maintained: use the Makefile.
 
 ---
 
 ## Performance
 
-- **Startup Time**: ~50-100ms (V8 initialization)
-- **Memory Usage**: Minimal overhead
-- **Event Loop**: Efficient libuv integration
-- **JIT Compilation**: Full V8 optimizations
+Measured against Node.js 24 on the same machine with `make bench`: startup is about 15 ms (Node.js: 20 ms), TCP throughput and file I/O match or beat Node.js, and HTTP is within a factor of 2. 4 of 23 benchmarks are 2 to 3 times slower. All the numbers are in [docs/performance.md](docs/performance.md).
 
 ---
 
@@ -527,9 +532,9 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Version**: 0.9.0 (Development) — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
-**Status**: Active Development
-**Last Updated**: 2026-10-16
+**Version**: 1.0.0 — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
+**Status**: Stable (macOS on Apple Silicon)
+**Last Updated**: 2026-11-09
 
 ## Support 🐸
 

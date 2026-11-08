@@ -3,22 +3,25 @@
 #include <cstddef>
 #include <v8.h>
 
-// Raw storage behind a JS Buffer object (internal field 0).
+// The bytes of a Buffer or other ArrayBufferView. They belong to V8: don't keep
+// the pointer past the current call into native code.
 struct BufferData {
-    char* data;           // Raw byte array
-    size_t length;        // Buffer length
-    bool owns_data;       // Free on destructor if true
+    char* data;     // nullptr when the length is 0
+    size_t length;
 };
 
-// Get internal BufferData from a Buffer object
-BufferData* GetBufferData(v8::Local<v8::Object> buffer_obj);
+// Get the bytes of an ArrayBufferView (a Buffer or any typed array)
+BufferData GetBufferData(v8::Local<v8::Object> view_object);
 
-// True if value was created by the Buffer constructor (safe to pass to GetBufferData)
+// True if value is an instance of Buffer (safe to pass to GetBufferData)
 bool IsBuffer(v8::Local<v8::Value> value);
 
 // A new Buffer holding a copy of data
 v8::Local<v8::Object> NewBuffer(v8::Isolate* isolate, v8::Local<v8::Context> context,
                                 const char* data, size_t length);
+
+// Forget the thread's Buffer constructor (before its isolate is disposed)
+void ResetBufferState();
 
 // Byte strings hold one char per byte (codes 0-255). These back the JS modules
 // (http, stream) that work on raw bytes:

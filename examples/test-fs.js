@@ -1,0 +1,344 @@
+// fs self-test: exits with code 1 if a check fails. Also runs under Node.js.
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const util = require('util');
+const { check, throws, rejects, checkError, section, once, run } = require('./lib/check');
+
+const root = path.join(fs.realpathSync(os.tmpdir()), `frogjs-fs-${process.pid}`);
+const at = (...parts) => path.join(root, ...parts);
+const call = (fn, ...args) => new Promise((resolve) => fn(...args, (err, ...rest) => resolve([err, ...rest])));
+
+run(async () => {
+  fs.mkdirSync(root);
+
+  section('Whole files');
+  const file = at('a.txt');
+  fs.writeFileSync(file, 'héllo');
+  const bytes = fs.readFileSync(file);
+  check('no encoding gives a Buffer', Buffer.isBuffer(bytes), true);
+  check('bytes', bytes.length, 6);
+  check('encoding string', fs.readFileSync(file, 'utf8'), 'héllo');
+  check('encoding option', fs.readFileSync(file, { encoding: 'hex' }), bytes.toString('hex'));
+  check('encoding null', Buffer.isBuffer(fs.readFileSync(file, { encoding: null })), true);
+  const binary = Buffer.from([0, 1, 0, 255, 0]);
+  fs.writeFileSync(at('b.bin'), binary);
+  check('binary safe', fs.readFileSync(at('b.bin')).equals(binary), true);
+  fs.writeFileSync(at('typed'), new Uint16Array([0x4141]));
+  check('typed array data', fs.readFileSync(at('typed'), 'utf8'), 'AA');
+  fs.writeFileSync(at('view'), new DataView(new ArrayBuffer(1)));
+  check('DataView data', fs.statSync(at('view')).size, 1);
+  fs.writeFileSync(at('enc'), 'ffff', 'hex');
+  check('write encoding', fs.readFileSync(at('enc')).length, 2);
+  fs.appendFileSync(at('enc'), 'x');
+  check('appendFileSync', fs.readFileSync(at('enc')).length, 3);
+  fs.writeFileSync(at('flag'), 'a');
+  fs.writeFileSync(at('flag'), 'b', { flag: 'a' });
+  check('write flag', fs.readFileSync(at('flag'), 'utf8'), 'ab');
+  throws('wx on an existing file', () => fs.writeFileSync(at('flag'), 'x', { flag: 'wx' }), { code: 'EEXIST' });
+  fs.writeFileSync(at('mode'), 'x', { mode: 0o600 });
+  check('write mode', fs.statSync(at('mode')).mode & 0o777, 0o600);
+  fs.writeFileSync(at('smode'), 'x', { mode: '640' });
+  check('octal string mode', fs.statSync(at('smode')).mode & 0o777, 0o640);
+
+  const big = 'x'.repeat(300000);
+  const [bigErr, bigData] = await call(fs.readFile, (fs.writeFileSync(at('big'), big), at('big')), 'utf8');
+  check('readFile reads everything', [bigErr, bigData.length], [null, 300000]);
+  check('readFile Buffer', Buffer.isBuffer((await call(fs.readFile, file))[1]), true);
+  check('writeFile', (await call(fs.writeFile, at('w'), 'data'))[0], null);
+  check('writeFile options', (await call(fs.writeFile, at('w2'), 'ff', 'hex'))[0], null);
+  check('written', fs.readFileSync(at('w'), 'utf8'), 'data');
+  check('appendFile', (await call(fs.appendFile, at('w'), '!'))[0], null);
+  check('appendFile options', (await call(fs.appendFile, at('w'), '!', 'utf8'))[0], null);
+  check('appended', fs.readFileSync(at('w'), 'utf8'), 'data!!');
+
+  section('Many async writes close their descriptors');
+  const openFds = [];
+  for (let i = 0; i < 300; i++) openFds.push(call(fs.writeFile, at('many'), 'x'));
+  await Promise.all(openFds);
+  const probe = fs.openSync(file);
+  fs.closeSync(probe);
+  check('descriptors reused', probe < 200, true);
+
+  section('Errors');
+  throws('readFileSync ENOENT', () => fs.readFileSync(at('nope')), {
+    name: 'Error', code: 'ENOENT', syscall: 'open', path: at('nope'),
+    message: `ENOENT: no such file or directory, open '${at('nope')}'`,
+  });
+  throws('errno is a number', () => {
+    try {
+      fs.readFileSync(at('nope'));
+    } catch (err) {
+      if (typeof err.errno === 'number') throw err;
+    }
+  }, { code: 'ENOENT' });
+  throws('directory read', () => fs.readFileSync(root), { code: 'EISDIR' });
+  checkError('readFile ENOENT', (await call(fs.readFile, at('nope')))[0], { code: 'ENOENT', syscall: 'open' });
+  checkError('writeFile ENOENT', (await call(fs.writeFile, at('no/dir/x'), 'a'))[0], { code: 'ENOENT' });
+  throws('no path', () => fs.readFileSync(), { name: 'TypeError', code: 'ERR_INVALID_ARG_TYPE' });
+  throws('object path', () => fs.statSync({}), { code: 'ERR_INVALID_ARG_TYPE' });
+  throws('function path', () => fs.statSync(() => {}), { code: 'ERR_INVALID_ARG_TYPE' });
+  throws('null byte', () => fs.readFileSync('a\0b'), { code: 'ERR_INVALID_ARG_VALUE' });
+  throws('no callback', () => fs.readFile(file), { code: 'ERR_INVALID_ARG_TYPE' });
+  throws('bad encoding', () => fs.readFileSync(file, 'nope'), { code: 'ERR_INVALID_ARG_VALUE' });
+  throws('bad options', () => fs.readFileSync(file, 1), { code: 'ERR_INVALID_ARG_TYPE' });
+  throws('bad flag', () => fs.readFileSync(file, { flag: 'zz' }), { code: 'ERR_INVALID_ARG_VALUE' });
+  throws('bad mode string', () => fs.writeFileSync(at('x'), 'a', { mode: 'zz' }), { code: 'ERR_INVALID_ARG_VALUE' });
+  throws('bad mode', () => fs.writeFileSync(at('x'), 'a', { mode: {} }), { code: 'ERR_INVALID_ARG_TYPE' });
+  throws('bad data', () => fs.writeFileSync(at('x'), {}), { code: 'ERR_INVALID_ARG_TYPE' });
+  throws('bad fd type', () => fs.closeSync('1'), { code: 'ERR_INVALID_ARG_TYPE' });
+  throws('bad fd value', () => fs.closeSync(-1), { code: 'ERR_OUT_OF_RANGE' });
+  check('path as Buffer', fs.readFileSync(Buffer.from(file), 'utf8'), 'héllo');
+
+  section('Directories');
+  fs.mkdirSync(at('d'));
+  throws('mkdir EEXIST', () => fs.mkdirSync(at('d')), { code: 'EEXIST', syscall: 'mkdir' });
+  check('recursive returns the first created', fs.mkdirSync(at('p/q/r'), { recursive: true }), at('p'));
+  check('recursive on an existing path', fs.mkdirSync(at('p/q/r'), { recursive: true }), undefined);
+  check('trailing slash', fs.mkdirSync(at('s/t/'), { recursive: true }), at('s'));
+  throws('recursive through a file', () => fs.mkdirSync(at('a.txt/x'), { recursive: true }), { code: 'ENOTDIR' });
+  fs.mkdirSync(at('m'), 0o700);
+  check('mode argument', fs.statSync(at('m')).mode & 0o777, 0o700);
+  check('mkdir async', (await call(fs.mkdir, at('e')))[0], null);
+  check('mkdir async recursive', await call(fs.mkdir, at('f/g'), { recursive: true }), [null, at('f')]);
+  checkError('mkdir async EEXIST', (await call(fs.mkdir, at('e')))[0], { code: 'EEXIST' });
+  fs.writeFileSync(at('d/one'), '1');
+  fs.mkdirSync(at('d/two'));
+  check('readdirSync', fs.readdirSync(at('d')).sort(), ['one', 'two']);
+  const dirents = fs.readdirSync(at('d'), { withFileTypes: true }).sort((x, y) => (x.name < y.name ? -1 : 1));
+  check('Dirent names', dirents.map((d) => d.name), ['one', 'two']);
+  check('Dirent types', dirents.map((d) => [d.isFile(), d.isDirectory(), d.isSymbolicLink()]), [[true, false, false], [false, true, false]]);
+  check('readdir', (await call(fs.readdir, at('d')))[1].sort(), ['one', 'two']);
+  check('readdir options', (await call(fs.readdir, at('d'), { withFileTypes: true }))[1].length, 2);
+  checkError('readdir ENOENT', (await call(fs.readdir, at('nope')))[0], { code: 'ENOENT', syscall: 'scandir' });
+  throws('readdirSync ENOENT', () => fs.readdirSync(at('nope')), { code: 'ENOENT' });
+  throws('rmdir not empty', () => fs.rmdirSync(at('d')), { code: 'ENOTEMPTY', syscall: 'rmdir' });
+  fs.rmdirSync(at('m'));
+  check('rmdirSync', fs.existsSync(at('m')), false);
+  check('rmdir', (await call(fs.rmdir, at('e')))[0], null);
+  checkError('rmdir ENOENT', (await call(fs.rmdir, at('e')))[0], { code: 'ENOENT' });
+
+  section('Stat');
+  const stats = fs.statSync(file);
+  check('Stats class', stats instanceof fs.Stats, true);
+  check('size', stats.size, 6);
+  check('methods', [stats.isFile(), stats.isDirectory(), stats.isSymbolicLink(), stats.isFIFO(), stats.isSocket(), stats.isBlockDevice(), stats.isCharacterDevice()],
+    [true, false, false, false, false, false, false]);
+  check('directory', fs.statSync(root).isDirectory(), true);
+  check('dates', [stats.mtime instanceof Date, stats.atime instanceof Date, stats.ctime instanceof Date, stats.birthtime instanceof Date], [true, true, true, true]);
+  check('mtimeMs', Math.abs(stats.mtimeMs - stats.mtime.getTime()) < 1, true);
+  check('stat', (await call(fs.stat, file))[1].size, 6);
+  check('stat options', (await call(fs.stat, file, {}))[1].size, 6);
+  check('lstat', (await call(fs.lstat, file))[1].isFile(), true);
+  check('lstatSync', fs.lstatSync(file).isFile(), true);
+  checkError('stat ENOENT', (await call(fs.stat, at('nope')))[0], { code: 'ENOENT', syscall: 'stat' });
+  checkError('lstat ENOENT', (await call(fs.lstat, at('nope')))[0], { code: 'ENOENT', syscall: 'lstat' });
+  throws('statSync ENOENT', () => fs.statSync(at('nope')), { code: 'ENOENT' });
+  throws('lstatSync ENOENT', () => fs.lstatSync(at('nope')), { code: 'ENOENT' });
+  check('throwIfNoEntry', fs.statSync(at('nope'), { throwIfNoEntry: false }), undefined);
+  check('lstat throwIfNoEntry', fs.lstatSync(at('nope'), { throwIfNoEntry: false }), undefined);
+  check('existsSync', [fs.existsSync(file), fs.existsSync(at('nope')), fs.existsSync(), fs.existsSync('a\0b')], [true, false, false, false]);
+  fs.accessSync(file);
+  fs.accessSync(file, fs.constants.R_OK);
+  throws('accessSync', () => fs.accessSync(at('nope')), { code: 'ENOENT', syscall: 'access' });
+  check('access', (await call(fs.access, file))[0], null);
+  check('access mode', (await call(fs.access, file, fs.constants.R_OK))[0], null);
+  checkError('access ENOENT', (await call(fs.access, at('nope')))[0], { code: 'ENOENT' });
+
+  section('realpath');
+  check('realpathSync', fs.realpathSync(at('d/../a.txt')), file);
+  throws('realpathSync ENOENT', () => fs.realpathSync(at('nope')), { code: 'ENOENT' });
+  check('realpath', await call(fs.realpath, at('d/../a.txt')), [null, file]);
+  check('realpath options', await call(fs.realpath, at('d/../a.txt'), {}), [null, file]);
+  checkError('realpath ENOENT', (await call(fs.realpath, at('nope')))[0], { code: 'ENOENT' });
+
+  section('Rename, copy, delete');
+  fs.renameSync(at('w'), at('w3'));
+  check('renameSync', fs.existsSync(at('w3')), true);
+  check('rename', (await call(fs.rename, at('w3'), at('w4')))[0], null);
+  throws('renameSync ENOENT', () => fs.renameSync(at('nope'), at('x')), {
+    code: 'ENOENT', syscall: 'rename', path: at('nope'), dest: at('x'),
+    message: `ENOENT: no such file or directory, rename '${at('nope')}' -> '${at('x')}'`,
+  });
+  throws('rename bad argument names it', () => fs.renameSync(1, at('x')), { code: 'ERR_INVALID_ARG_TYPE', message: /"oldPath"/ });
+  fs.copyFileSync(at('w4'), at('c1'));
+  check('copyFileSync', fs.readFileSync(at('c1'), 'utf8'), 'data!!');
+  throws('COPYFILE_EXCL', () => fs.copyFileSync(at('w4'), at('c1'), fs.constants.COPYFILE_EXCL), { code: 'EEXIST', syscall: 'copyfile' });
+  check('copyFile', (await call(fs.copyFile, at('w4'), at('c2')))[0], null);
+  check('copyFile mode', (await call(fs.copyFile, at('w4'), at('c2'), 0))[0], null);
+  fs.unlinkSync(at('c1'));
+  check('unlinkSync', fs.existsSync(at('c1')), false);
+  check('unlink', (await call(fs.unlink, at('c2')))[0], null);
+  checkError('unlink ENOENT', (await call(fs.unlink, at('c2')))[0], { code: 'ENOENT', syscall: 'unlink' });
+  throws('unlinkSync ENOENT', () => fs.unlinkSync(at('c2')), { code: 'ENOENT' });
+
+  section('rm');
+  fs.mkdirSync(at('tree/a/b'), { recursive: true });
+  fs.writeFileSync(at('tree/a/b/f'), 'x');
+  throws('rm directory without recursive', () => fs.rmSync(at('tree')), { code: 'ERR_FS_EISDIR' });
+  throws('rm ENOENT', () => fs.rmSync(at('nope')), { code: 'ENOENT' });
+  fs.rmSync(at('nope'), { force: true });
+  fs.rmSync(at('tree'), { recursive: true });
+  check('rmSync recursive', fs.existsSync(at('tree')), false);
+  fs.writeFileSync(at('single'), 'x');
+  fs.rmSync(at('single'));
+  check('rmSync file', fs.existsSync(at('single')), false);
+  fs.mkdirSync(at('tree2/a'), { recursive: true });
+  fs.writeFileSync(at('tree2/a/f'), 'x');
+  checkError('rm directory', (await call(fs.rm, at('tree2')))[0], { code: 'ERR_FS_EISDIR' });
+  check('rm recursive', (await call(fs.rm, at('tree2'), { recursive: true }))[0], null);
+  check('rm removed', fs.existsSync(at('tree2')), false);
+  check('rm force', (await call(fs.rm, at('nope'), { force: true }))[0], null);
+  checkError('rm ENOENT', (await call(fs.rm, at('nope')))[0], { code: 'ENOENT' });
+
+  section('File descriptors');
+  const fd = fs.openSync(at('fd'), 'w+');
+  check('openSync', typeof fd, 'number');
+  check('writeSync Buffer', fs.writeSync(fd, Buffer.from('abcdef')), 6);
+  check('writeSync string', fs.writeSync(fd, 'gh'), 2);
+  check('writeSync range', fs.writeSync(fd, Buffer.from('xyz'), 1, 1), 1);
+  check('writeSync position', fs.writeSync(fd, 'Z', 0), 1);
+  const into = Buffer.alloc(4);
+  check('readSync', fs.readSync(fd, into, 0, 4, 0), 4);
+  check('read bytes', into.toString(), 'Zbcd');
+  check('readSync options', fs.readSync(fd, into, { offset: 1, length: 1, position: 1 }), 1);
+  check('readSync at the end', fs.readSync(fd, into, 0, 4, 100), 0);
+  check('fstatSync', fs.fstatSync(fd).size, 9);
+  check('fstat', (await call(fs.fstat, fd))[1].size, 9);
+  check('fstat options', (await call(fs.fstat, fd, {}))[1].size, 9);
+  check('readFileSync fd', fs.readFileSync(fd, 'utf8'), '');
+  check('read', (await call(fs.read, fd, into, 0, 2, 0)).slice(0, 2), [null, 2]);
+  check('read options', (await call(fs.read, fd, into, { offset: 0, length: 1, position: 0 })).slice(0, 2), [null, 1]);
+  check('write', (await call(fs.write, fd, Buffer.from('q'))).slice(0, 2), [null, 1]);
+  check('write string', (await call(fs.write, fd, 'qq')).slice(0, 2), [null, 2]);
+  fs.writeFileSync(fd, 'tail');
+  check('writeFileSync fd', fs.fstatSync(fd).size, 16);
+  throws('read range', () => fs.readSync(fd, into, { offset: 9 }), { code: 'ERR_OUT_OF_RANGE' });
+  throws('read length', () => fs.readSync(fd, into, 0, 9), { code: 'ERR_OUT_OF_RANGE' });
+  throws('read buffer', () => fs.readSync(fd, 'x'), { code: 'ERR_INVALID_ARG_TYPE' });
+  throws('write data', () => fs.writeSync(fd, {}), { code: 'ERR_INVALID_ARG_TYPE' });
+  fs.closeSync(fd);
+  throws('closed descriptor', () => fs.closeSync(fd), { code: 'EBADF', syscall: 'close' });
+  throws('read closed', () => fs.readSync(fd, into), { code: 'EBADF', syscall: 'read' });
+  throws('write closed', () => fs.writeSync(fd, 'a'), { code: 'EBADF', syscall: 'write' });
+  throws('fstat closed', () => fs.fstatSync(fd), { code: 'EBADF' });
+  const [openErr, fd2] = await call(fs.open, at('fd'));
+  check('open', openErr, null);
+  check('close', (await call(fs.close, fd2))[0], null);
+  const [, fd3] = await call(fs.open, at('fd'), 'r');
+  await call(fs.close, fd3);
+  const [, fd4] = await call(fs.open, at('fd'), 'r', 0o644);
+  await new Promise((resolve) => {
+    fs.close(fd4);
+    setTimeout(resolve, 5);
+  });
+  checkError('open ENOENT', (await call(fs.open, at('nope')))[0], { code: 'ENOENT', syscall: 'open' });
+  checkError('close EBADF', (await call(fs.close, fd2))[0], { code: 'EBADF' });
+  checkError('read EBADF', (await call(fs.read, fd2, into, 0, 1, 0))[0], { code: 'EBADF' });
+
+  section('Read streams');
+  fs.writeFileSync(at('stream'), '0123456789');
+  const chunks = [];
+  const reader = fs.createReadStream(at('stream'));
+  const opened = once(reader, 'open');
+  reader.on('data', (chunk) => chunks.push(chunk));
+  check('open event has the fd', typeof (await opened)[0], 'number');
+  await once(reader, 'close');
+  check('content', Buffer.concat(chunks).toString(), '0123456789');
+  check('bytesRead', reader.bytesRead, 10);
+  check('is a ReadStream', reader instanceof fs.ReadStream, true);
+  const collect = async (stream) => {
+    let text = '';
+    for await (const chunk of stream) text += chunk.toString();
+    return text;
+  };
+  check('start and end are inclusive', await collect(fs.createReadStream(at('stream'), { start: 2, end: 4 })), '234');
+  check('end only', await collect(fs.createReadStream(at('stream'), { end: 1 })), '01');
+  check('start past the end', await collect(fs.createReadStream(at('stream'), { start: 99 })), '');
+  check('encoding', await collect(fs.createReadStream(at('stream'), 'utf8')), '0123456789');
+  check('small highWaterMark', await collect(fs.createReadStream(at('stream'), { highWaterMark: 3 })), '0123456789');
+  const fdStream = fs.openSync(at('stream'));
+  check('from a descriptor', await collect(fs.createReadStream(null, { fd: fdStream, start: 8 })), '89');
+  const missing = fs.createReadStream(at('nope'));
+  const [missingError] = await once(missing, 'error').catch((err) => [err]);
+  checkError('missing file', missingError, { code: 'ENOENT' });
+  throws('start > end', () => fs.createReadStream(at('stream'), { start: 5, end: 1 }), { code: 'ERR_OUT_OF_RANGE' });
+  throws('bad start', () => fs.createReadStream(at('stream'), { start: -1 }), { code: 'ERR_OUT_OF_RANGE' });
+  const early = fs.createReadStream(at('stream'));
+  early.destroy();
+  await once(early, 'close');
+  check('destroyed before it opened', early.destroyed, true);
+  const closing = fs.createReadStream(at('stream'));
+  await once(closing, 'open');
+  const closedEvent = once(closing, 'close');
+  closing.close();
+  await closedEvent;
+  check('close()', closing.destroyed, true);
+
+  section('Write streams');
+  const writer = fs.createWriteStream(at('out'));
+  check('write', writer.write('abc'), true);
+  writer.write(Buffer.from('def'));
+  writer.end('ghi');
+  await once(writer, 'close');
+  check('content', fs.readFileSync(at('out'), 'utf8'), 'abcdefghi');
+  check('bytesWritten', writer.bytesWritten, 9);
+  check('is a WriteStream', writer instanceof fs.WriteStream, true);
+  const appender = fs.createWriteStream(at('out'), { flags: 'a' });
+  appender.end('!');
+  await once(appender, 'close');
+  check('append flag', fs.readFileSync(at('out'), 'utf8'), 'abcdefghi!');
+  const patcher = fs.createWriteStream(at('out'), { flags: 'r+', start: 1 });
+  patcher.end('ZZ');
+  await once(patcher, 'close');
+  check('start', fs.readFileSync(at('out'), 'utf8'), 'aZZdefghi!');
+  const encoded = fs.createWriteStream(at('enc2'));
+  encoded.end('ff', 'hex');
+  await once(encoded, 'close');
+  check('encoding', fs.readFileSync(at('enc2')).length, 1);
+  const fdWriter = fs.createWriteStream(null, { fd: fs.openSync(at('fdw'), 'w') });
+  fdWriter.end('x');
+  await once(fdWriter, 'close');
+  check('to a descriptor', fs.readFileSync(at('fdw'), 'utf8'), 'x');
+  const badWriter = fs.createWriteStream(at('no/such/dir'));
+  const [badError] = await once(badWriter, 'error').catch((err) => [err]);
+  checkError('open failure', badError, { code: 'ENOENT' });
+  throws('bad start', () => fs.createWriteStream(at('x'), { start: -1 }), { code: 'ERR_OUT_OF_RANGE' });
+  const closer = fs.createWriteStream(at('closer'));
+  closer.write('x');
+  await new Promise((resolve) => closer.close(resolve));
+  check('close() flushes', fs.readFileSync(at('closer'), 'utf8'), 'x');
+
+  await new Promise((resolve, reject) => {
+    const big2 = Buffer.alloc(200000, 'y');
+    fs.writeFileSync(at('pipe-in'), big2);
+    const out = fs.createWriteStream(at('pipe-out'));
+    fs.createReadStream(at('pipe-in')).pipe(out);
+    out.on('close', resolve);
+    out.on('error', reject);
+  });
+  check('pipe', fs.statSync(at('pipe-out')).size, 200000);
+
+  section('Promises');
+  const p = fs.promises;
+  await p.writeFile(at('pr'), 'promise');
+  check('readFile', await p.readFile(at('pr'), 'utf8'), 'promise');
+  await p.appendFile(at('pr'), '!');
+  check('stat', (await p.stat(at('pr'))).size, 8);
+  check('lstat', (await p.lstat(at('pr'))).isFile(), true);
+  check('realpath', await p.realpath(at('pr')), at('pr'));
+  await p.mkdir(at('prd'));
+  check('readdir', await p.readdir(at('prd')), []);
+  await p.rmdir(at('prd'));
+  await p.rename(at('pr'), at('pr2'));
+  await p.copyFile(at('pr2'), at('pr3'));
+  await p.access(at('pr3'));
+  await p.unlink(at('pr3'));
+  await p.rm(at('pr2'));
+  await rejects('rejection', p.readFile(at('nope')), { code: 'ENOENT' });
+  check('util.promisify', await util.promisify(fs.readFile)(file, 'utf8'), 'héllo');
+
+  section('Cleanup');
+  fs.rmSync(root, { recursive: true });
+  check('removed', fs.existsSync(root), false);
+});

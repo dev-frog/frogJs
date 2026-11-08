@@ -141,4 +141,6 @@ function main() {
     console.log(`types/ matches FrogJS: ${moduleCount} modules and ${Object.keys(declared.globals).length} globals checked`);
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { declarations };

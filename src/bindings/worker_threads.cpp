@@ -8,10 +8,12 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include "frogjs/allocator.h"
 #include "frogjs/buffer.h"
 #include "frogjs/errors.h"
 #include "frogjs/js_module.h"
 #include "frogjs/loop.h"
+#include "frogjs/process.h"
 #include "frogjs/runtime.h"
 #include "frogjs/util.h"
 #include "frogjs/v8_compat.h"
@@ -303,7 +305,6 @@ thread_local Persistent<Function> g_worker_emitter;
 thread_local std::vector<PortHandle*> g_thread_ports;
 
 const int kHostObjectPort = 0;
-const int kHostObjectBuffer = 1;
 
 Local<String> V8String(Isolate* isolate, const std::string& value) {
     return String::NewFromUtf8(isolate, value.c_str(), NewStringType::kNormal,
@@ -348,7 +349,7 @@ void CallEmitter(Isolate* isolate, Local<Context> context, Persistent<Function>&
     Local<Value> ignored;
     if (!emitter.Get(isolate)->Call(context, Undefined(isolate), argc, argv).ToLocal(&ignored) &&
         try_catch.HasCaught()) {
-        frogjs::ReportException(isolate, &try_catch);
+        frogjs::HandleUncaught(isolate, &try_catch);
     }
 }
 
@@ -438,13 +439,6 @@ class Serializer : public ValueSerializer::Delegate {
             ThrowCloneError("Object that needs transfer was found in message but not listed in transferList");
             return Nothing<bool>();
         }
-        if (IsBuffer(object)) {
-            BufferData* buffer = GetBufferData(object);
-            serializer_.WriteUint32(kHostObjectBuffer);
-            serializer_.WriteUint64(buffer->length);
-            serializer_.WriteRawBytes(buffer->data, buffer->length);
-            return Just(true);
-        }
         Local<String> name = object->GetConstructorName();
         String::Utf8Value utf8(isolate, name);
         ThrowCloneError(std::string(*utf8 ? *utf8 : "Object") + " object could not be cloned.");
@@ -503,18 +497,6 @@ class Deserializer : public ValueDeserializer::Delegate {
             uint32_t index = 0;
             if (!deserializer_.ReadUint32(&index) || index >= ports_.size()) return MaybeLocal<Object>();
             return ports_[index];
-        }
-        if (kind == kHostObjectBuffer) {
-            uint64_t length = 0;
-            const void* data = nullptr;
-            if (!deserializer_.ReadUint64(&length) || !deserializer_.ReadRawBytes(length, &data)) {
-                return MaybeLocal<Object>();
-            }
-            // A Buffer arrives as a Uint8Array, as in Node.js
-            std::unique_ptr<BackingStore> store = ArrayBuffer::NewBackingStore(isolate, length);
-            if (length > 0) memcpy(store->Data(), data, length);
-            Local<ArrayBuffer> buffer = ArrayBuffer::New(isolate, std::move(store));
-            return Uint8Array::New(buffer, 0, length);
         }
         isolate->ThrowException(Exception::Error(String::NewFromUtf8Literal(isolate, "Unable to deserialize cloned data.")));
         return MaybeLocal<Object>();
@@ -665,7 +647,7 @@ void DeliverMessages(PortHandle* handle) {
         TryCatch try_catch(isolate);
         Local<Value> value;
         if (!ReadMessage(isolate, context, message.get()).ToLocal(&value)) {
-            if (try_catch.HasCaught()) frogjs::ReportException(isolate, &try_catch);
+            if (try_catch.HasCaught()) frogjs::HandleUncaught(isolate, &try_catch);
             continue;
         }
         Local<Value> argv[3] = {handle->object.Get(isolate), String::NewFromUtf8Literal(isolate, "message"), value};
@@ -916,7 +898,7 @@ void WorkerMain(void* arg) {
     uv_unref(reinterpret_cast<uv_handle_t*>(&stop_async));
 
     Isolate::CreateParams create_params;
-    create_params.array_buffer_allocator = ArrayBuffer::Allocator::NewDefaultAllocator();
+    create_params.array_buffer_allocator = frogjs::ArrayBufferAllocator();
     Isolate* isolate = Isolate::New(create_params);
 
     // Terminated before it started: no JavaScript runs at all
@@ -942,6 +924,7 @@ void WorkerMain(void* arg) {
         if (!stopping) {
             SignalParent(worker.get());
 
+            frogjs::TrackPromiseRejections(isolate);
             std::string code = worker->script;
             std::string error;
             if (!worker->is_eval && !frogjs::ReadScriptFile(worker->script, &code, &error)) {
@@ -950,9 +933,19 @@ void WorkerMain(void* arg) {
                 exception->Set(context, String::NewFromUtf8Literal(isolate, "code"),
                     String::NewFromUtf8Literal(isolate, "MODULE_NOT_FOUND")).Check();
                 frogjs::ForwardWorkerError(isolate, exception);
-            } else if (frogjs::ExecuteScript(isolate, context, code, filename)) {
-                while (!worker->stopping && uv_run(&loop, UV_RUN_DEFAULT)) {
-                    isolate->PerformMicrotaskCheckpoint();
+            } else if (worker->is_eval ? frogjs::ExecuteScript(isolate, context, code, filename)
+                                       : frogjs::RunMainModule(isolate, context, filename)) {
+                frogjs::DrainTasks(isolate);
+                while (!worker->stopping && uv_loop_alive(&loop)) {
+                    uv_run(&loop, UV_RUN_ONCE);
+                    frogjs::DrainTasks(isolate);
+                }
+                // The worker ended by itself: 'exit' listeners run, and
+                // process.exitCode becomes the exit code
+                if (!worker->stopping) {
+                    int code_at_exit = frogjs::FinishProcess(isolate, context, 0);
+                    std::lock_guard<std::mutex> lock(worker->mutex);
+                    if (!worker->exit_code_set) worker->exit_code = code_at_exit;
                 }
             }
         }
@@ -966,6 +959,7 @@ void WorkerMain(void* arg) {
         isolate->TerminateExecution();
         frogjs::TerminateAllWorkers();  // workers this worker created
         while (!g_thread_ports.empty()) ClosePort(g_thread_ports.back(), false);
+        frogjs::RunThreadCleanups();
         uv_walk(&loop, [](uv_handle_t* handle, void*) {
             if (!uv_is_closing(handle)) uv_close(handle, nullptr);
         }, nullptr);
@@ -974,6 +968,10 @@ void WorkerMain(void* arg) {
         g_port_template.Reset();
         g_port_emitter.Reset();
         g_worker_emitter.Reset();
+        frogjs::ResetModuleState();
+        frogjs::ResetProcessState();
+        frogjs::ClearPromiseRejections();
+        ResetBufferState();
     }
 
     {
@@ -986,7 +984,6 @@ void WorkerMain(void* arg) {
     }
     uv_run(&loop, UV_RUN_DEFAULT);
     isolate->Dispose();
-    delete create_params.array_buffer_allocator;
     uv_loop_close(&loop);
 
     {
@@ -994,6 +991,26 @@ void WorkerMain(void* arg) {
         worker->exited = true;
     }
     SignalParent(worker.get());
+}
+
+// structuredClone(value[, { transfer }])
+void StructuredClone(const FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    Local<Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 1) {
+        Local<Value> error = Exception::TypeError(String::NewFromUtf8Literal(isolate, "The \"value\" argument must be specified"));
+        error.As<Object>()->Set(context, String::NewFromUtf8Literal(isolate, "code"), String::NewFromUtf8Literal(isolate, "ERR_MISSING_ARGS")).Check();
+        isolate->ThrowException(error);
+        return;
+    }
+    Local<Value> transfer = Undefined(isolate);
+    if (args[1]->IsObject()) {
+        if (!args[1].As<Object>()->Get(context, String::NewFromUtf8Literal(isolate, "transfer")).ToLocal(&transfer)) return;
+    }
+    std::unique_ptr<Message> message = Serialize(isolate, context, args[0], transfer);
+    if (message == nullptr) return;
+    Local<Value> result;
+    if (ReadMessage(isolate, context, message.get()).ToLocal(&result)) args.GetReturnValue().Set(result);
 }
 
 // Parent side: report what the worker did since the last signal
@@ -1235,4 +1252,5 @@ void SetupWorkerThreads(Isolate* isolate, Local<Context> context) {
         return;
     }
     global->Set(context, String::NewFromUtf8Literal(isolate, "worker_threads"), worker_threads).Check();
+    frogjs::SetFunction(isolate, context, global, "structuredClone", StructuredClone);
 }

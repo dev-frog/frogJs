@@ -18,4 +18,21 @@ declare module 'path' {
     /** `'.js'` for `'a/b.js'`, `''` when there is none. */
     function extname(path: string): string;
     function isAbsolute(path: string): boolean;
+    /** The relative path from `from` to `to`. */
+    function relative(from: string, to: string): string;
+
+    interface ParsedPath {
+        root: string;
+        dir: string;
+        base: string;
+        ext: string;
+        name: string;
+    }
+    function parse(path: string): ParsedPath;
+    /** The reverse of parse(). */
+    function format(pathObject: Partial<ParsedPath>): string;
+    /** Returns `path` (it only matters on Windows). */
+    function toNamespacedPath(path: string): string;
+    /** This module itself: FrogJS only has POSIX paths. */
+    const posix: typeof import('path');
 }

@@ -339,14 +339,14 @@ function formatRaw(ctx, value, recurseTimes, typedArray) {
     }
   }
 
+  if (native.isBuffer(value)) return formatBuffer(ctx, value);
+
   if (noIterator) {
     keys = getKeys(value, ctx.showHidden);
     braces = ['{', '}'];
     if (typeof value === 'function') {
       base = getFunctionBase(value, constructor, tag);
       if (keys.length === 0) return ctx.stylize(base, 'special');
-    } else if (native.isBuffer(value)) {
-      return formatBuffer(ctx, value);
     } else if (constructor === 'Object' && !isError(value) && !(value instanceof Date) &&
                !(value instanceof RegExp) && !native.isBoxedPrimitive(value) && !(value instanceof Promise)) {
       if (Object.prototype.toString.call(value) === '[object Arguments]') {
@@ -1043,13 +1043,13 @@ static void BufferHex(const FunctionCallbackInfo<Value>& args) {
     Local<Context> context = isolate->GetCurrentContext();
     if (args.Length() < 2 || !IsBuffer(args[0])) return;
 
-    BufferData* data = GetBufferData(args[0].As<Object>());
-    size_t length = data != nullptr ? data->length : 0;
+    BufferData data = GetBufferData(args[0].As<Object>());
+    size_t length = data.length;
     size_t max = static_cast<size_t>(args[1]->IntegerValue(context).FromMaybe(50));
     static const char digits[] = "0123456789abcdef";
     std::string hex;
     for (size_t i = 0; i < length && i < max; i++) {
-        unsigned char byte = static_cast<unsigned char>(data->data[i]);
+        unsigned char byte = static_cast<unsigned char>(data.data[i]);
         hex += digits[byte >> 4];
         hex += digits[byte & 0x0f];
     }

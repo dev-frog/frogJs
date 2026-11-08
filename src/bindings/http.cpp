@@ -56,9 +56,7 @@ function reportError(err) {
 
 // Run fn after the current callback returns (V8 runs microtasks then)
 function defer(fn) {
-  Promise.resolve().then(() => {
-    try { fn(); } catch (err) { reportError(err); }
-  });
+  Promise.resolve().then(fn);
 }
 
 function httpError(message, code) {
@@ -330,6 +328,7 @@ class HTTPParser {
       info.versionMajor = Number(match[3]);
       info.versionMinor = Number(match[4]);
       if (info.versionMajor !== 1) return this._fail('Unsupported HTTP version', 'HPE_INVALID_VERSION');
+      if (INVALID_PATH.test(info.url)) return this._fail('Invalid characters in the URL', 'HPE_INVALID_URL');
     } else {
       const match = /^HTTP\/(\d)\.(\d) (\d{3})(?: (.*))?$/.exec(lines[0]);
       if (!match) return this._fail('Invalid status line', 'HPE_INVALID_STATUS');
@@ -370,6 +369,10 @@ class HTTPParser {
       // Both headers together are a request smuggling vector
       if (contentLength !== null) {
         return this._fail('Content-Length with Transfer-Encoding', 'HPE_UNEXPECTED_CONTENT_LENGTH');
+      }
+      // HTTP/1.0 has no Transfer-Encoding: a proxy may frame the message differently
+      if (this.type === 'request' && info.versionMinor === 0) {
+        return this._fail('Transfer-Encoding in HTTP/1.0', 'HPE_INVALID_TRANSFER_ENCODING');
       }
       chunked = isChunked(transferEncoding);
       if (!chunked && this.type === 'request') {
@@ -436,7 +439,9 @@ class IncomingMessage extends Readable {
   }
 
   // Data is pushed as it arrives from the socket
-  _read() {}
+  _read() {
+    if (this.socket && !this.complete) this.socket.resume();
+  }
 
   // Destroying a message whose body is still arriving closes the connection
   _destroy(err, callback) {
@@ -446,7 +451,8 @@ class IncomingMessage extends Readable {
 
   _push(bytes) {
     const data = this._latin1 ? bytes : this._decoder.write(bytes);
-    if (data.length > 0) this.push(data);
+    // A body nobody reads must not fill the memory: stop reading the socket
+    if (data.length > 0 && !this.push(data) && this.socket) this.socket.pause();
   }
 
   _complete() {
@@ -559,9 +565,9 @@ class OutgoingMessage extends ProtocolEmitter {
     }
     const bytes = toBytes(chunk, encoding);
     if (!this._headerWritten) this._writeHead(null);
-    this._writeBody(bytes);
+    const flushed = this._writeBody(bytes);
     if (callback) defer(callback);
-    return true;
+    return flushed !== false;
   }
 
   end(chunk, encoding, callback) {
@@ -587,9 +593,9 @@ class OutgoingMessage extends ProtocolEmitter {
   }
 
   _writeBody(bytes) {
-    if (!this._hasBody || bytes.length === 0) return;
-    if (this._chunked) this._writeRaw(bytes.length.toString(16) + '\r\n' + bytes + '\r\n');
-    else this._writeRaw(bytes);
+    if (!this._hasBody || bytes.length === 0) return true;
+    if (this._chunked) return this._writeRaw(bytes.length.toString(16) + '\r\n' + bytes + '\r\n');
+    return this._writeRaw(bytes);
   }
 
   _emitFinish() {
@@ -627,6 +633,10 @@ class ServerResponse extends OutgoingMessage {
     }
     this.statusCode = statusCode;
     if (statusMessage !== undefined) this.statusMessage = statusMessage;
+    // Set here or as a property: it goes into the head of the response
+    if (this.statusMessage !== undefined && INVALID_HEADER_VALUE.test(this.statusMessage)) {
+      throw httpError('Invalid character in statusMessage', 'ERR_INVALID_CHAR');
+    }
     this._validateStatus();
     if (Array.isArray(headers)) {
       for (let i = 0; i + 1 < headers.length; i += 2) this.setHeader(headers[i], headers[i + 1]);
@@ -690,7 +700,7 @@ class ServerResponse extends OutgoingMessage {
   }
 
   _writeRaw(bytes) {
-    this.socket.write(bytes, 'latin1');
+    return this.socket.write(bytes, 'latin1');
   }
 
   // Close the connection without finishing the response
@@ -720,6 +730,8 @@ class Server extends ProtocolEmitter {
     this.listening = false;
     this.keepAliveTimeout = 5000;
     this.headersTimeout = 60000;
+    // Time to receive a whole request: a trickled body can't hold a connection forever
+    this.requestTimeout = 300000;
     this.maxHeaderSize = options.maxHeaderSize || MAX_HEADER_SIZE;
     this._handle = null;
     this._connections = new Set();
@@ -748,17 +760,17 @@ class Server extends ProtocolEmitter {
 
     // allowHalfOpen: a client that half-closes still gets its responses
     const handle = net.createServer({ allowHalfOpen: true }, (socket) => this._onConnection(socket));
-    try {
-      if (host !== undefined) handle.listen(port, host);
-      else handle.listen(port);
-    } catch (err) {
-      handle.close();
-      defer(() => this.emit('error', err));
-      return this;
-    }
     this._handle = handle;
-    this.listening = true;
-    defer(() => this.emit('listening'));
+    handle.on('error', (err) => {
+      if (!this.listening) this._handle = null;
+      this.emit('error', err);
+    });
+    handle.on('listening', () => {
+      this.listening = true;
+      this.emit('listening');
+    });
+    if (host !== undefined) handle.listen(port, host);
+    else handle.listen(port);
     return this;
   }
 
@@ -815,6 +827,7 @@ class Server extends ProtocolEmitter {
       onBody: (bytes) => conn.req._push(bytes),
       onComplete: () => {
         conn.reqComplete = true;
+        this._clearTimer(conn);
         conn.req._complete();
         if (conn.res._done) this._next(conn);
         else conn.parser.pause();
@@ -826,6 +839,8 @@ class Server extends ProtocolEmitter {
 
     socket.on('data', (data) => {
       conn.parser.execute(data);
+      // Pipelined requests wait for the current response. Don't queue them without limit.
+      if (conn.parser.paused && conn.parser.buf.length >= this.maxHeaderSize) socket.pause();
       this._maybeEnd(conn);
     });
     socket.on('end', () => {
@@ -843,6 +858,10 @@ class Server extends ProtocolEmitter {
       if (this.listenerCount('clientError') > 0) this.emit('clientError', err, socket);
     });
     socket.on('close', () => this._onConnectionClose(conn));
+    // The response's write() reports the socket's backpressure
+    socket.on('drain', () => {
+      if (conn.res) conn.res.emit('drain');
+    });
 
     this.emit('connection', socket);
   }
@@ -858,6 +877,7 @@ class Server extends ProtocolEmitter {
     conn.keepAlive = info.versionMinor >= 1 ? !hasToken(connection, 'close') : hasToken(connection, 'keep-alive');
 
     const res = new ServerResponse(req, conn, this);
+    if (conn.parser.state !== 'headers-done') this._setTimer(conn, this.requestTimeout);
     // A throwing handler (or req/res listener) gets a 500 instead of a hung client
     req._onListenerError = res._onListenerError = () => this._failResponse(conn, res);
     conn.req = req;
@@ -915,6 +935,7 @@ class Server extends ProtocolEmitter {
       return;
     }
     this._setTimer(conn, this.keepAliveTimeout);
+    conn.socket.resume();
     conn.parser.resume();
     this._maybeEnd(conn);
   }
@@ -961,7 +982,18 @@ class Server extends ProtocolEmitter {
     if (!(ms > 0)) return;
     conn.timer = setTimeout(() => {
       conn.timer = null;
-      if (conn.req) return;
+      if (conn.req) {
+        // The request's body didn't arrive in time (requestTimeout)
+        if (conn.reqComplete) return;
+        conn.req._abort();
+        if (conn.res && !conn.res._headerWritten) {
+          conn.socket.write('HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n', 'latin1');
+          this._endConnection(conn);
+        } else {
+          conn.socket.destroy();
+        }
+        return;
+      }
       if (conn.parser.buf.length > 0) {
         conn.socket.write('HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n', 'latin1');
       }
@@ -1091,11 +1123,13 @@ class ClientRequest extends OutgoingMessage {
       parser.close();
       this._onClose();
     });
+    socket.on('drain', () => this.emit('drain'));
   }
 
   _writeRaw(bytes) {
     if (this._pending) this._pending.push(bytes);
-    else if (this.socket) this.socket.write(bytes, 'latin1');
+    else if (this.socket) return this.socket.write(bytes, 'latin1');
+    return true;
   }
 
   _writeHead(bodyLength) {

@@ -23,7 +23,7 @@ const interval = setInterval(() => {
 // 3. File System (Sync)
 console.log("\n3. File System (Sync):");
 fs.writeFileSync("demo.txt", "FrogJS Demo File");
-const syncContent = fs.readFileSync("demo.txt");
+const syncContent = fs.readFileSync("demo.txt", "utf8");
 console.log("   - writeFileSync & readFileSync work!");
 console.log("   - Content:", syncContent);
 
@@ -32,7 +32,7 @@ console.log("\n4. File System (Async):");
 fs.writeFile("demo-async.txt", "Async Demo", (err) => {
     if (!err) {
         console.log("   - writeFile works!");
-        fs.readFile("demo-async.txt", (err, data) => {
+        fs.readFile("demo-async.txt", "utf8", (err, data) => {
             if (!err) {
                 console.log("   - readFile works!");
                 console.log("   - Content:", data);

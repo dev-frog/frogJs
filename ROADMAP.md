@@ -1,6 +1,6 @@
 # FrogJS Development Roadmap
 
-## 📊 Current Status: Version 0.9.0
+## 📊 Current Status: Version 1.0.0
 
 ### ✅ Completed (v0.1.0)
 - Core V8 runtime integration
@@ -66,6 +66,10 @@
 - Rewritten [contributing guide](docs/contributing.md) and [architecture document](docs/architecture.md)
 - `make test` / `make check`, header dependency tracking, and CI running test + lint + type checks
 - Module fixes: nested `require()` resolves from the requiring module's directory; `module.exports` can be any value; the main script has `module`/`exports`
+
+### ✅ Completed (v1.0.0)
+- See [Version 1.0.0](#version-100---stable-release) below and the [changelog](CHANGELOG.md)
+- Breaking, to match Node.js before the API is frozen: `fs` contents and errors, `net` sockets as streams, `Buffer` as a `Uint8Array`, timers as objects, uncaught callback errors and rejections ending the process
 
 ---
 
@@ -410,39 +414,47 @@ declare module 'http' { ... }
 ### Version 1.0.0 - Stable Release
 
 **Priority: CRITICAL**
-**Estimated Effort: 4-6 weeks**
 
 #### 1.0.0 Goals
-- Complete feature parity with planned v0.x features
-- Comprehensive test suite
-- Performance optimizations
-- Memory leak fixes
-- Security audit
-- Complete documentation
-- API stability guarantees
-- Long-term support commitment
+| Goal | Status | Where |
+|------|--------|-------|
+| Complete feature parity with planned v0.x features | ✅ Done | Every feature listed under v0.2.0 to v0.9.0 exists and is tested. Most "not included yet" items that would have changed the API were also done, so they don't break it later |
+| Comprehensive test suite | ✅ Done | 21 self-tests, the CLI and REPL tests, under sanitizers too; the old ones that only printed now assert |
+| Performance optimizations | ✅ Done | [docs/performance.md](docs/performance.md) |
+| Memory leak fixes | ✅ Done | Buffers, file descriptors, digests; `make leakcheck` finds 0 leaks, and RSS stays flat over long runs |
+| Security audit | ⚠️ Internal review done | [docs/security-audit.md](docs/security-audit.md). Not an independent, third-party audit |
+| Complete documentation | ✅ Done | `make check-docs` ties the API reference to the declarations, and `make check-types` ties those to the runtime |
+| API stability guarantees | ✅ Written | [docs/api-stability.md](docs/api-stability.md) |
+| Long-term support commitment | ⚠️ Draft | [docs/support-policy.md](docs/support-policy.md): needs the maintainer's confirmation, since it is a promise of their time |
+
+**Implementation Notes:**
+- Node.js is the reference: new tests run under both runtimes, and where they disagreed FrogJS changed.
+- **Memory.** `Buffer` became a `Uint8Array` subclass instead of native storage with a no-op finalizer, which fixes the leak at its root and brings bounds checks, indexing and GC accounting. `fs.writeFile` leaked its descriptor, and digests leaked at exit.
+- **Bugs found by the audit:** `fs.readFile` read only as many bytes as the descriptor's number. `Buffer.alloc(-1)` aborted the process, and a method called on another object read out of bounds. `setTimeout(fn, -1)` never fired. A worker's `SharedArrayBuffer` was freed through an allocator that was already deleted. `readFileSync` stopped at the first NUL. Circular `require()` overflowed the stack. Empty modules failed. See the [changelog](CHANGELOG.md).
+- **Coverage** is measured for both languages: V8's precise coverage reaches the embedded JavaScript through the inspector protocol, in a coverage-only build.
+- Not done, and possible later: ES modules, TLS/HTTPS, ciphers and signatures, `fork()` with IPC, global `URL`, `fetch`, an official Linux build, top-level `await` in the REPL.
 
 ---
 
 ## 🛠️ Technical Debt & Improvements
 
 ### High Priority
-- [ ] Memory management review
-- [ ] Error handling standardization
-- [ ] Thread safety analysis
-- [ ] Performance profiling
+- [x] Memory management review ([architecture](docs/architecture.md#memory-management))
+- [x] Error handling standardization (`HandleUncaught`, `MakeCallback`, `Error` objects with `code`)
+- [x] Thread safety analysis (the allocator; [security review](docs/security-audit.md))
+- [x] Performance profiling ([benchmarks](docs/performance.md))
 
 ### Medium Priority
 - [ ] Code refactoring for modularity
 - [ ] Better separation of concerns
 - [ ] Internal API documentation
-- [ ] Benchmark suite
+- [x] Benchmark suite (`make bench`)
 
 ### Low Priority
-- [ ] Code style consistency
+- [ ] Code style consistency (reformat the older C++ with clang-format, then enforce `make format-check`)
 - [ ] Better comments
 - [ ] Architecture diagrams
-- [ ] Development tools
+- [x] Development tools (`test-asan`, `leakcheck`, `coverage`, `fuzz`, `check-docs`)
 
 ---
 
@@ -457,13 +469,17 @@ declare module 'http' { ... }
 - ✅ Updated documentation
 
 ### Version 1.0.0 Success Criteria
-- ✅ All planned v0.x features complete
-- ✅ 90%+ test coverage
-- ✅ Performance within 2x of Node.js for equivalent operations
-- ✅ No known memory leaks
-- ✅ API stability for 6+ months
-- ✅ Production-ready error handling
-- ✅ Complete API documentation
+Measured on macOS on Apple Silicon, 2026-11-09:
+
+| Criterion | Status | Result |
+|-----------|--------|--------|
+| All planned v0.x features complete | ✅ Met | |
+| 90%+ test coverage | ✅ Met | 91.5% of lines: JavaScript 91.3%, C++ 91.8% (`make coverage COVERAGE_MIN=90`, in CI). Worker threads' JavaScript isn't recorded, so it counts as uncovered |
+| Performance within 2x of Node.js for equivalent operations | ⚠️ Mostly | 19 of 23 benchmarks in the last run. `stream-pipe` and `sha256-small` are about 2.9x and `buffer-hex-base64` about 2.2x; `timers` and `sha256-large` sit right at 2x. See [performance](docs/performance.md) |
+| No known memory leaks | ✅ Met | `make leakcheck`: 0 leaks. `test-memory.js`: no growth. On macOS only |
+| API stability for 6+ months | ❌ Not met | It can't be met yet: 1.0.0 itself changes APIs, so the clock starts with this release |
+| Production-ready error handling | ✅ Met | Uncaught errors and rejections, exit codes, `Error` objects with `code`, hostile input handled |
+| Complete API documentation | ✅ Met | `make check-docs`: all declared names documented |
 
 ---
 
@@ -477,35 +493,20 @@ declare module 'http' { ... }
 - **v0.7.0**: ✅ Done
 - **v0.8.0**: ✅ Done
 - **v0.9.0**: ✅ Done
-- **v1.0.0**: 4-6 weeks (recommended immediate focus)
-
-**Total to v1.0.0**: ~6-9 months
+- **v1.0.0**: ✅ Done
 
 ---
 
-## 🚀 Quick Start Recommendation
+## 🚀 What Could Come Next
 
-Next up is **v1.0.0** (Stable Release): memory leaks first (Buffers), then test coverage and API stability. Smaller follow-ups that build on earlier versions:
-- `fs.createReadStream` / `fs.createWriteStream` on top of `stream.Readable`/`Writable`
-- Make `net` sockets `Duplex` streams so `socket.write()` reports backpressure (HTTP responses would inherit it)
-- Top-level `await` in the REPL; report unhandled promise rejections
-- `fs` callbacks receive error strings, not `Error` objects, and `fs.readFile` has no encoding argument
-- Free Buffer memory when a Buffer is garbage collected (`BufferFinalizer` is still a no-op, so long-running code that allocates Buffers, e.g. with `randomBytes`, grows)
-- Ciphers (`createCipheriv`/`createDecipheriv`, AES-GCM) and `scrypt`
-- `process.stdin` as a Readable stream, `process.nextTick`, `queueMicrotask`, `structuredClone` (the worker serializer can back it)
+New features after 1.0 are additive: see the [API stability policy](docs/api-stability.md). Candidates:
+- ES modules
+- TLS and `https`
+- Ciphers (`createCipheriv`/`createDecipheriv`, AES-GCM), `scrypt`, `hkdf`, signatures
 - `child_process.fork()` with an IPC channel
-- Wrap the main script like a module (top-level `return`, absolute stack-trace paths)
-- `node_modules` package resolution; circular `require()` returning partial exports
-- Reformat the older C++ files with clang-format (one commit per file), then enforce `make format-check` in CI; add clang-tidy with a generated `compile_commands.json`
-- `fs` errors as `Error` objects with `code` (the declarations will need updating with it)
-
-```bash
-# Create implementation branch
-git checkout -b fix/buffer-memory
-
-# Focus on one feature at a time
-# Test thoroughly with examples
-# Update documentation as you go
-```
-
-This approach will make FrogJS much more usable and establish patterns for future features!
+- Global `URL` and `URLSearchParams`, `AbortController`, `fetch`
+- Top-level `await` and `.editor` in the REPL
+- `node:assert`, `node:readline`, `node:dns`
+- An official Linux build, with SHA-NI on x86-64
+- The benchmarks still over 2x: `stream` overhead, `crypto.createHash` setup, hex and base64 with SIMD
+- Reformat the older C++ with clang-format, then enforce `make format-check` in CI; clang-tidy

@@ -31,48 +31,63 @@ async function main(): Promise<void> {
     const home: string | undefined = process.env.HOME;
     check('process', argv.length > 0 && typeof home === 'string' && process.versions.v8.length > 0 && process.cwd() === path.resolve());
     check('process.stdout', process.stdout.fd === 1 && typeof process.stdout.isTTY === 'boolean' && process.stdout.write(''));
-    const timer: number = setTimeout(() => {}, 1);
-    clearTimeout(timer);
+    const timer: FrogJS.Timeout = setTimeout((a: number) => a, 1, 1);
+    clearTimeout(timer.unref());
+    clearImmediate(setImmediate(() => {}));
+    check('process is an EventEmitter', process.on('exit', () => {}) === process && typeof process.nextTick === 'function');
+    check('new globals', performance.now() > 0 && structuredClone([1])[0] === 1 && new TextDecoder().decode(new TextEncoder().encode('é')) === 'é' && global === globalThis);
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
     check('__filename', path.isAbsolute(__filename) && __dirname === path.dirname(__filename));
     check('module globals', globalThis.fs === fs && child_process.spawn === spawn);
 
     // Buffer
     const buf: Buffer = Buffer.from('frog');
-    check('Buffer', buf.length === 4 && buf.toString('hex') === '66726f67' && Buffer.byteLength('é') === 2 &&
+    check('Buffer', buf.length === 4 && buf[0] === 102 && buf.readUInt8(1) === 114 && buf instanceof Uint8Array && buf.toString('hex') === '66726f67' && Buffer.byteLength('é') === 2 &&
         Buffer.isBuffer(Buffer.concat([buf, Buffer.alloc(1)])) && buf.slice(1, 2).toString() === 'r' &&
         Buffer.from(new Uint8Array([104, 105])).toString() === 'hi' && Buffer.from([1, 2]).length === 2);
 
-    // fs: string errors, string contents, boolean isFile
+    // fs: Error objects, Buffers unless an encoding is given, Stats methods
     const file = path.join(os.tmpdir(), `frogjs-types-${process.pid}.txt`);
     fs.writeFileSync(file, 'ribbit');
-    const text: string = fs.readFileSync(file);
+    const bytes: Buffer = fs.readFileSync(file);
+    const text: string = fs.readFileSync(file, 'utf8');
     const stats: fs.Stats = fs.statSync(file);
-    check('fs sync', text === 'ribbit' && stats.isFile === true && stats.size === 6 && stats.mtime instanceof Date);
-    await new Promise<void>((resolve) => fs.readFile(file, (err, data) => {
+    check('fs sync', Buffer.isBuffer(bytes) && text === 'ribbit' && stats.isFile() && stats.size === 6 && stats.mtime instanceof Date);
+    await new Promise<void>((resolve) => fs.readFile(file, 'utf8', (err, data) => {
         check('fs.readFile', err === null && data === 'ribbit');
         resolve();
     }));
     await new Promise<void>((resolve) => fs.readFile('/no/such/file', (err) => {
-        check('fs error is a string', typeof err === 'string');
+        check('fs error', err instanceof Error && err.code === 'ENOENT' && err.syscall === 'open');
         resolve();
     }));
     try {
         fs.readFileSync('/no/such/file');
     } catch (err) {
-        check('fs sync error is a string', typeof err === 'string');
+        check('fs sync error', (err as fs.FsError).code === 'ENOENT');
     }
+    check('fs.promises', (await fs.promises.readFile(file, 'utf8')) === 'ribbit');
+    await new Promise<void>((resolve, reject) => {
+        const out = fs.createWriteStream(file + '.copy');
+        fs.createReadStream(file).pipe(out);
+        out.on('close', resolve);
+        out.on('error', reject);
+    });
+    check('fs streams', fs.readFileSync(file + '.copy', 'utf8') === 'ribbit');
+    fs.rmSync(file + '.copy');
     const names: string[] = fs.readdirSync(os.tmpdir());
     check('fs.readdirSync', names.includes(path.basename(file)) && fs.existsSync(file));
     fs.unlinkSync(file);
 
     // path, os, util
-    check('path', path.join('a', 'b') === 'a/b' && path.extname('x.ts') === '.ts' && path.basename('/a/b.js', '.js') === 'b' && path.sep === '/');
+    check('path', path.join('a', 'b') === 'a/b' && path.extname('x.ts') === '.ts' && path.basename('/a/b.js', '.js') === 'b' && path.sep === '/' &&
+        path.relative('/a/b', '/a/c') === '../c' && path.parse('/a/b.c').name === 'b' && path.format({ dir: '/a', base: 'b' }) === '/a/b' && path.posix.sep === '/');
     const cpu: os.CpuInfo | undefined = os.cpus()[0];
     check('os', os.EOL === '\n' && typeof os.totalmem() === 'number' && (cpu === undefined || typeof cpu.times.idle === 'number'));
     check('util', util.format('%s=%d', 'x', 1) === 'x=1' && util.inspect({ a: [1] }, { depth: 0 }) === '{ a: [Array] }' &&
         util.isDeepStrictEqual([1], [1]) && typeof util.inspect.custom === 'symbol');
     const readFileAsync = util.promisify(fs.readFile);
-    check('util.promisify', (await readFileAsync(__filename)).length > 0);
+    check('util.promisify', String(await readFileAsync(__filename)).length > 0);
 
     // events
     class Frog extends EventEmitter {}
@@ -164,13 +179,14 @@ async function main(): Promise<void> {
     check('http', body === '200 yes GET /pond');
     server.close();
 
-    const echo = net.createServer((socket) => socket.on('data', (data) => socket.end(data.toUpperCase())));
-    echo.listen(0, '127.0.0.1');
+    const echo = net.createServer((socket) => socket.on('data', (data) => socket.end(String(data).toUpperCase())));
+    await new Promise<void>((resolve) => echo.listen(0, '127.0.0.1', resolve));
     const reply = await new Promise<string>((resolve) => {
         const socket = net.connect(echo.address().port, '127.0.0.1', () => socket.write('ping'));
+        socket.setEncoding('utf8');
         socket.on('data', (data) => resolve(data));
     });
-    check('net', reply === 'PING');
+    check('net', reply === 'PING' && net.isIP('::1') === 6);
     echo.close();
 
     console.log(`types usage: ${passed} passed, ${failed} failed`);

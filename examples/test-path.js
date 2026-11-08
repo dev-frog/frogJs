@@ -1,51 +1,94 @@
-// Test path module
-console.log('=== Path Tests ===');
+// path self-test: exits with code 1 if a check fails. Also runs under Node.js.
+const path = require('path');
+const { check, throws, section, run } = require('./lib/check');
 
-// Test path.join()
-console.log('path.join("/foo", "bar", "baz/asdf", "quux", ".."):', path.join('/foo', 'bar', 'baz/asdf', 'quux', '..'));
-console.log('path.join() result is "/foo/bar/baz/asdf":', path.join('/foo', 'bar', 'baz/asdf', 'quux', '..') === '/foo/bar/baz/asdf');
+const cwd = process.cwd();
 
-// Test path.resolve()
-console.log('path.resolve("/foo/bar", "./baz"):', path.resolve('/foo/bar', './baz'));
-console.log('path.resolve() with absolute is "/foo/bar/baz":', path.resolve('/foo/bar', './baz') === '/foo/bar/baz');
-console.log('path.resolve("/foo/bar", "/tmp/file/") is "/tmp/file":', path.resolve('/foo/bar', '/tmp/file/') === '/tmp/file');
-console.log('path.resolve() with no args is cwd:', path.resolve() === process.cwd());
+run(() => {
+  section('join');
+  check('segments', path.join('/foo', 'bar', 'baz/asdf', 'quux', '..'), '/foo/bar/baz/asdf');
+  check('nothing', path.join(), '.');
+  check('empty strings', path.join('', ''), '.');
+  check('relative', path.join('a', '../..', 'b'), '../b');
+  check('skips empty', path.join('a', '', 'b'), 'a/b');
+  check('keeps a trailing slash', path.join('a', 'b/'), 'a/b/');
+  throws('non-string', () => path.join('a', 1), { name: 'TypeError', code: 'ERR_INVALID_ARG_TYPE' });
 
-// Test path.normalize()
-console.log('path.normalize("/foo/bar//baz/asdf/quux/.."):', path.normalize('/foo/bar//baz/asdf/quux/..'));
-console.log('path.normalize() result is "/foo/bar/baz/asdf":', path.normalize('/foo/bar//baz/asdf/quux/..') === '/foo/bar/baz/asdf');
+  section('resolve');
+  check('relative', path.resolve('/foo/bar', './baz'), '/foo/bar/baz');
+  check('absolute wins', path.resolve('/foo/bar', '/tmp/file/'), '/tmp/file');
+  check('no arguments', path.resolve(), cwd);
+  check('from the current directory', path.resolve('a'), cwd + '/a');
+  check('above the root', path.resolve('/../..'), '/');
+  check('empty segments', path.resolve('', '/a', ''), '/a');
+  throws('non-string', () => path.resolve(null), { code: 'ERR_INVALID_ARG_TYPE' });
 
-// Test path.dirname()
-console.log('path.dirname("/foo/bar/baz/asdf/quux"):', path.dirname('/foo/bar/baz/asdf/quux'));
-console.log('path.dirname() result is "/foo/bar/baz/asdf":', path.dirname('/foo/bar/baz/asdf/quux') === '/foo/bar/baz/asdf');
+  section('normalize');
+  check('dots and slashes', path.normalize('/foo/bar//baz/asdf/quux/..'), '/foo/bar/baz/asdf');
+  check('empty', path.normalize(''), '.');
+  check('root', path.normalize('/'), '/');
+  check('above root', path.normalize('/../a'), '/a');
+  check('relative above', path.normalize('../a/../..'), '../..');
+  check('trailing slash', path.normalize('a/b/'), 'a/b/');
+  check('only dots', path.normalize('./'), './');
+  check('dot', path.normalize('.'), '.');
+  check('collapses to nothing', path.normalize('a/..'), '.');
+  check('collapses with a slash', path.normalize('a/../'), './');
+  throws('non-string', () => path.normalize(1), { code: 'ERR_INVALID_ARG_TYPE' });
 
-// Test path.basename()
-console.log('path.basename("/foo/bar/quux.html"):', path.basename('/foo/bar/quux.html'));
-console.log('path.basename() result is "quux.html":', path.basename('/foo/bar/quux.html') === 'quux.html');
-console.log('path.basename() with ext is "quux":', path.basename('/foo/bar/quux.html', '.html') === 'quux');
+  section('dirname');
+  for (const [input, expected] of [['/foo/bar/baz', '/foo/bar'], ['/foo/bar/', '/foo'], ['/foo', '/'], ['/', '/'], ['', '.'], ['a', '.'], ['a/b', 'a'], ['//a', '//'], ['a//b', 'a/'], ['///', '/']]) {
+    check(JSON.stringify(input), path.dirname(input), expected);
+  }
+  throws('non-string', () => path.dirname({}), { code: 'ERR_INVALID_ARG_TYPE' });
 
-// Test path.extname()
-console.log('path.extname("index.html"):', path.extname('index.html'));
-console.log('path.extname("index.coffee.md") is ".md":', path.extname('index.coffee.md') === '.md');
-console.log('path.extname(".index") is "":', path.extname('.index') === '');
+  section('basename');
+  for (const [args, expected] of [[['/a/b.html'], 'b.html'], [['/a/b.html', '.html'], 'b'], [['/a/b/'], 'b'], [['/'], ''], [[''], ''], [['b.html', 'html'], 'b.'], [['b', 'b'], ''], [['a/', 'a'], 'a'], [['/a', '/a'], ''], [['ab', 'b'], 'a'], [['a/b///'], 'b'], [['a.js', ''], 'a.js'], [['///a'], 'a'], [['/', 'a'], '/'], [['/', '/'], '']]) {
+    check(JSON.stringify(args), path.basename(...args), expected);
+  }
+  throws('non-string', () => path.basename(1), { code: 'ERR_INVALID_ARG_TYPE' });
+  throws('non-string suffix', () => path.basename('a', 1), { code: 'ERR_INVALID_ARG_TYPE' });
+  throws('function', () => path.basename(() => {}), { code: 'ERR_INVALID_ARG_TYPE' });
 
-// Test path.isAbsolute()
-console.log('path.isAbsolute("/foo/bar") is true:', path.isAbsolute('/foo/bar') === true);
-console.log('path.isAbsolute("qux/") is false:', path.isAbsolute('qux/') === false);
+  section('extname');
+  for (const [input, expected] of [['a.html', '.html'], ['a.b.md', '.md'], ['a.', '.'], ['a', ''], ['.bashrc', ''], ['..', ''], ['.', ''], ['', ''], ['a/.b', ''], ['a.b/', '.b'], ['/a.b/c', ''], ['a/..', '']]) {
+    check(JSON.stringify(input), path.extname(input), expected);
+  }
+  throws('non-string', () => path.extname(undefined), { code: 'ERR_INVALID_ARG_TYPE' });
 
-// Test constants
-console.log('path.sep is "/":', path.sep === '/');
-console.log('path.delimiter is ":":', path.delimiter === ':');
+  section('isAbsolute');
+  check('values', [path.isAbsolute('/a'), path.isAbsolute('a'), path.isAbsolute(''), path.isAbsolute('./a')], [true, false, false, false]);
+  throws('non-string', () => path.isAbsolute(1), { code: 'ERR_INVALID_ARG_TYPE' });
 
-// Test require('path')
-console.log('require("path") returns the path module:', require('path') === path);
+  section('relative');
+  check('sibling', path.relative('/a/b/c', '/a/b/d'), '../d');
+  check('child', path.relative('/a', '/a/b'), 'b');
+  check('parent', path.relative('/a/b', '/a'), '..');
+  check('same', path.relative('/a', '/a'), '');
+  check('same after resolving', path.relative('/a/', '/a'), '');
+  check('from the root', path.relative('/', '/a'), 'a');
+  throws('non-string', () => path.relative(1, 'a'), { code: 'ERR_INVALID_ARG_TYPE' });
+  throws('non-string to', () => path.relative('a', 1), { code: 'ERR_INVALID_ARG_TYPE' });
 
-// Test type validation
-try {
-    path.join('foo', 42);
-    console.log('path.join() with a number throws: false');
-} catch (e) {
-    console.log('path.join() with a number throws TypeError:', e instanceof TypeError);
-}
+  section('parse and format');
+  check('full', path.parse('/home/u/file.txt'), { root: '/', dir: '/home/u', base: 'file.txt', ext: '.txt', name: 'file' });
+  check('relative', path.parse('a/b'), { root: '', dir: 'a', base: 'b', ext: '', name: 'b' });
+  check('root', path.parse('/'), { root: '/', dir: '/', base: '', ext: '', name: '' });
+  check('in the root', path.parse('/a'), { root: '/', dir: '/', base: 'a', ext: '', name: 'a' });
+  check('empty', path.parse(''), { root: '', dir: '', base: '', ext: '', name: '' });
+  check('no directory', path.parse('a.b'), { root: '', dir: '', base: 'a.b', ext: '.b', name: 'a' });
+  throws('parse non-string', () => path.parse(1), { code: 'ERR_INVALID_ARG_TYPE' });
+  check('format dir and base', path.format({ dir: '/a', base: 'b.c' }), '/a/b.c');
+  check('format root', path.format({ root: '/', base: 'b' }), '/b');
+  check('format name and ext', path.format({ name: 'b', ext: '.c' }), 'b.c');
+  check('format ext without a dot', path.format({ name: 'b', ext: 'c' }), 'b.c');
+  check('format nothing', path.format({}), '');
+  throws('format non-object', () => path.format(1), { code: 'ERR_INVALID_ARG_TYPE' });
+  throws('format null', () => path.format(null), { code: 'ERR_INVALID_ARG_TYPE' });
 
-console.log('=== All Path Tests Complete ===');
+  section('Constants');
+  check('sep', path.sep, '/');
+  check('delimiter', path.delimiter, ':');
+  check('posix', path.posix.join('a', 'b'), 'a/b');
+  check('toNamespacedPath', path.toNamespacedPath('a'), 'a');
+});

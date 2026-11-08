@@ -7,7 +7,7 @@ console.log("File written successfully");
 
 // Read the file synchronously
 console.log("Reading test.txt...");
-const content = fs.readFileSync("test.txt");
+const content = fs.readFileSync("test.txt", "utf8");
 console.log("File content:");
 console.log(content);
 

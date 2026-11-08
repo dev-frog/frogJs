@@ -1,19 +1,23 @@
 # FrogJS API Reference
 
-Complete API documentation for FrogJS runtime and built-in modules.
+Complete API documentation for FrogJS runtime and built-in modules. `make check-docs` verifies that every declared export appears here. What is stable and what can change is in the [API stability policy](api-stability.md).
 
 ## Table of Contents
 - [Command Line](#command-line)
 - [REPL](#repl)
 - [Global Objects](#global-objects)
+- [Process API](#process-api)
 - [Console API](#console-api)
 - [Util API](#util-api)
+- [Buffer API](#buffer-api)
 - [Buffer Encodings](#buffer-encodings)
 - [Crypto API](#crypto-api)
 - [Child Process API](#child-process-api)
 - [Worker Threads API](#worker-threads-api)
 - [Timer API](#timer-api)
 - [File System API](#file-system-api)
+- [Path API](#path-api)
+- [OS API](#os-api)
 - [Network API](#network-api)
 - [HTTP API](#http-api)
 - [Events API](#events-api)
@@ -36,7 +40,7 @@ frogjs                                     # start the REPL
 | `-p`, `--print <script>` | Evaluate `script` and print the result like `console.log` would |
 | `-c`, `--check` | Compile the script (or stdin) without running it; exit code 1 on a syntax error |
 | `-i`, `--interactive` | Start the REPL even if stdin is not a terminal, after running the script or `--eval` code |
-| `-v`, `--version` | Print the version (`v0.9.0`) |
+| `-v`, `--version` | Print the version (`v1.0.0`) |
 | `-h`, `--help` | Print usage |
 | `-` | Read the script from stdin (the default when no script is given and stdin is not a terminal) |
 | `--` | End of options: the next argument is the script |
@@ -117,30 +121,89 @@ undefined
 
 ## Global Objects
 
-### `__filename`
-The absolute path of the current module.
+Every built-in module is also a global of the same name (`fs`, `http`, `child_process`, ...), the object `require()` returns. Besides those and the [standard JavaScript globals](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects):
 
-```javascript
-console.log(__filename); // /path/to/current/file.js
-```
+### `__filename`, `__dirname`
+The absolute path of the current module and its directory. In `-e` code, stdin and the REPL, `__filename` is `[eval]`, `[stdin]` or `[repl]` and `__dirname` is `.`.
 
-### `__dirname`
-The directory name of the current module.
+### `require(id)`, `module`, `exports`
+See [Module System](#module-system).
 
-```javascript
-console.log(__dirname); // /path/to/current
-```
+### `global`
+The global object (the same as `globalThis`).
+
+### `setTimeout`, `setInterval`, `setImmediate`, `clearTimeout`, `clearInterval`, `clearImmediate`
+See [Timer API](#timer-api).
+
+### `queueMicrotask(callback)`
+Run `callback` as a microtask. An exception from it is an uncaught exception.
+
+### `structuredClone(value[, { transfer }])`
+A deep copy by the structured clone algorithm: `Map`, `Set`, `Date`, `RegExp`, `BigInt`, errors, typed arrays and cycles work; functions throw `DataCloneError`. `transfer` lists `ArrayBuffer`s and `MessagePort`s to move instead of copy.
+
+### `performance`
+`performance.now()` is milliseconds since the process started, with sub-millisecond precision. `performance.timeOrigin` is when that was, in Unix milliseconds. `performance.toJSON()` returns `{ timeOrigin }`.
+
+### `TextEncoder`, `TextDecoder`
+`new TextEncoder().encode(string)` returns a `Uint8Array` of UTF-8; `encoding` is `'utf-8'`. `new TextDecoder([encoding[, { fatal, ignoreBOM }]]).decode(bytes)` supports UTF-8 only (`ERR_ENCODING_NOT_SUPPORTED` otherwise); with `fatal`, invalid input throws `ERR_ENCODING_INVALID_ENCODED_DATA`.
+
+---
+
+## Process API
+
+`process` is a global and an [EventEmitter](#events-api); also `require('process')`.
+
+### Properties
+| Property | Meaning |
+|----------|---------|
+| `process.argv` | `[execPath, absolute script path, ...arguments]` (no script entry for `-e` and the REPL) |
+| `process.execArgv` | FrogJS options before the script name |
+| `process.execPath` | Absolute path of the executable |
+| `process.env` | Environment variables, as a plain object. Child processes get its current content |
+| `process.pid`, `process.ppid` | Process IDs |
+| `process.platform`, `process.arch` | e.g. `'darwin'`, `'arm64'` |
+| `process.version`, `process.versions` | `'v1.0.0'`; `{ frogjs, v8, uv }` |
+| `process.release` | `{ name: 'frogjs' }` |
+| `process.title` | `'frogjs'` (setting it only changes the property) |
+| `process.config`, `process.features` | Empty objects, for code that reads them |
+| `process.exitCode` | The exit code when the process ends by itself or `exit()` gets no code |
+
+### `process.exit([code])`
+Emit `'exit'` once and end the process (on a worker thread: only the worker). Nothing after it runs.
+
+### `process.cwd()`, `process.chdir(directory)`, `process.umask([mask])`
+Current directory (failures throw with `code`), and the file mode mask: reading returns it, setting returns the previous one.
+
+### `process.nextTick(callback[, ...args])`
+Run `callback` after the current operation, before I/O and timers. Ticks share the microtask queue with promises in FrogJS, so a promise reaction queued *before* the tick runs first (in Node.js ticks always go first).
+
+### `process.hrtime([previous])`, `process.hrtime.bigint()`, `process.uptime()`
+A monotonic clock: `[seconds, nanoseconds]`, or the time since `previous`; nanoseconds as a BigInt; seconds since the process started.
+
+### `process.memoryUsage()`, `process.memoryUsage.rss()`, `process.cpuUsage()`
+`{ rss, heapTotal, heapUsed, external }` in bytes; `{ user, system }` in microseconds.
+
+### `process.kill(pid[, signal])`
+Send a signal (a name, or a number; default `'SIGTERM'`; `0` tests whether the process exists). Failure throws with `code`, such as `ESRCH`.
+
+### `process.emitWarning(warning[, type[, code]])`
+Emit `'warning'` on the next tick. Printed to stderr if nothing listens.
 
 ### `process.stdout`, `process.stderr`
 Writable streams for file descriptors 1 and 2 (`write()`, `fd`, `isTTY`). Writes are synchronous and ordered with `console.log`; `end()` doesn't close the descriptor, so `child.stdout.pipe(process.stdout)` is safe.
 
-### `require(id)`
-Load modules from the file system or built-in modules.
+### `process.stdin`
+A Readable over file descriptor 0, created on first use (`isTTY` tells whether it is a terminal). Reading keeps the process alive until the end of the input.
 
-```javascript
-const fs = require('fs');
-const localModule = require('./myModule');
-```
+### Events
+| Event | Arguments | When |
+|-------|-----------|------|
+| `'exit'` | `code` | The process is ending. Only synchronous work runs. A listener can change `process.exitCode` |
+| `'beforeExit'` | `code` | The event loop ran out of work (not on `process.exit()`). A listener can schedule more |
+| `'uncaughtException'` | `err`, `origin` | An exception nobody caught. With a listener the process goes on |
+| `'unhandledRejection'` | `reason`, `promise` | A rejected promise without a handler after the microtasks ran. Without a listener it becomes an uncaught exception |
+| `'warning'` | `warning` | `process.emitWarning()` |
+| `'SIGINT'`, `'SIGTERM'`, ... | `name`, `number` | The signal arrived (main thread only). A listener replaces the default action; it doesn't keep the process alive by itself |
 
 ---
 
@@ -241,308 +304,183 @@ Removes ANSI color codes from `str`.
 
 ## Timer API
 
-### `setTimeout(callback, delay)`
-Schedule callback execution after `delay` milliseconds.
+### `setTimeout(callback[, delay[, ...args]])`, `setInterval(callback[, delay[, ...args]])`
+Run `callback` once after `delay` milliseconds, or repeatedly. Delays outside 1 to 2^31-1 become 1. Extra arguments go to the callback; `this` is the timer. Returns a `Timeout`:
 
-**Parameters:**
-- `callback` (Function): Function to execute
-- `delay` (Number): Milliseconds to wait
+| Method | |
+|--------|---|
+| `ref()`, `unref()`, `hasRef()` | Whether this timer keeps the process alive (by default it does) |
+| `refresh()` | Start the delay over; a timeout that already ran runs again |
+| `close()` | Like `clearTimeout()` |
+| `[Symbol.toPrimitive]()` | Its numeric ID, also accepted by `clearTimeout()` |
 
-**Returns:** Number (timer ID)
+A callback that isn't a function throws `ERR_INVALID_ARG_TYPE`.
 
-```javascript
-const timerId = setTimeout(() => {
-    console.log('Executed after 1000ms');
-}, 1000);
-```
+### `setImmediate(callback[, ...args])`
+Run `callback` after the I/O of the current loop iteration. An immediate added while immediates run waits for the next iteration. Returns an `Immediate` with `ref()`, `unref()` and `hasRef()`.
 
-### `setInterval(callback, delay)`
-Schedule repeated callback execution every `delay` milliseconds.
+### `clearTimeout(timer)`, `clearInterval(timer)`, `clearImmediate(immediate)`
+Cancel it. Anything else, or a timer that already ended, is ignored.
 
-**Parameters:**
-- `callback` (Function): Function to execute
-- `delay` (Number): Interval in milliseconds
-
-**Returns:** Number (timer ID)
-
-```javascript
-const intervalId = setInterval(() => {
-    console.log('Executed every 1000ms');
-}, 1000);
-```
-
-### `clearTimeout(id)`
-Cancel a timeout.
-
-**Parameters:**
-- `id` (Number): Timer ID from `setTimeout`
-
-```javascript
-const timerId = setTimeout(callback, 1000);
-clearTimeout(timerId); // Cancel execution
-```
-
-### `clearInterval(id)`
-Cancel an interval.
-
-**Parameters:**
-- `id` (Number): Timer ID from `setInterval`
-
-```javascript
-const intervalId = setInterval(callback, 1000);
-clearInterval(intervalId); // Stop interval
-```
+`require('timers')` has the same functions.
 
 ---
 
 ## File System API
 
-### `fs.readFileSync(path)`
-Read file contents synchronously.
+`fs` follows Node.js. Every asynchronous function has a callback form, and most a `*Sync` form that throws instead (`mkdirSync`, ...). They behave the same: both run the same native code, the callback form on the thread pool. `fs.promises` has promise versions.
 
-**Parameters:**
-- `path` (String): File path
+**Errors** are `Error` objects: `code` (`'ENOENT'`), `errno`, `syscall` (`'open'`), `path`, and `dest` for two-path calls; the message is like `ENOENT: no such file or directory, open 'x'`. Invalid arguments throw `TypeError` with `ERR_INVALID_ARG_TYPE` or `ERR_INVALID_ARG_VALUE`, even for callback forms. Paths with a null byte are rejected.
 
-**Returns:** String (file contents)
+**Paths** are strings, Buffers or `Uint8Array`s (UTF-8).
 
-**Throws:** Error if file cannot be read
-
-```javascript
-const fs = require('fs');
-try {
-    const data = fs.readFileSync('config.json');
-    console.log(data);
-} catch (err) {
-    console.error('Failed to read file:', err);
-}
-```
-
-### `fs.writeFileSync(path, data)`
-Write data to file synchronously.
-
-**Parameters:**
-- `path` (String): File path
-- `data` (String): Data to write
-
-**Throws:** Error if file cannot be written
+### Whole files
+| Function | |
+|----------|---|
+| `fs.readFile(path[, options], callback)` / `readFileSync` | `path` can be a file descriptor. Without an encoding the result is a Buffer. `options` is an encoding or `{ encoding, flag }` |
+| `fs.writeFile(path, data[, options], callback)` / `writeFileSync` | `data` is a string or typed array. `options` is an encoding or `{ encoding, mode, flag }` |
+| `fs.appendFile(path, data[, options], callback)` / `appendFileSync` | The same, appending |
 
 ```javascript
-const fs = require('fs');
-try {
-    fs.writeFileSync('output.txt', 'Hello, FrogJS!');
-    console.log('File written successfully');
-} catch (err) {
-    console.error('Failed to write file:', err);
-}
+const text = fs.readFileSync('config.json', 'utf8');
+const bytes = fs.readFileSync('logo.png');          // a Buffer
+fs.writeFile('out.txt', text, (err) => { if (err) console.error(err.code); });
+const data = await fs.promises.readFile('config.json', 'utf8');
 ```
 
-### `fs.readFile(path, callback)`
-Read file contents asynchronously.
+Flags are `'r'`, `'r+'`, `'w'`, `'w+'`, `'wx'`, `'a'`, `'a+'`, `'ax'` and the rest of Node.js's strings, or a number.
 
-**Parameters:**
-- `path` (String): File path
-- `callback` (Function): `(err, data) => {}`
-  - `err` (Error | null): Error if occurred
-  - `data` (String): File contents
+### Directories
+| Function | |
+|----------|---|
+| `fs.mkdir(path[, options], callback)` / `mkdirSync` | `options` is a mode or `{ mode, recursive }`. With `recursive`, the result is the first directory created (absolute), or `undefined` |
+| `fs.readdir(path[, options], callback)` / `readdirSync` | Entry names without `.` and `..`. With `{ withFileTypes: true }`, `Dirent` objects: `name`, `parentPath`, `isFile()`, `isDirectory()`, `isSymbolicLink()` |
+| `fs.rmdir(path[, options], callback)` / `rmdirSync` | Remove an empty directory |
+| `fs.rm(path[, options], callback)` / `rmSync` | Remove a file or, with `{ recursive: true }`, a tree. `force` ignores a missing path. Symbolic links are removed, not followed |
+
+### Metadata
+| Function | |
+|----------|---|
+| `fs.stat(path[, options], callback)` / `statSync` | A `Stats`. `statSync(path, { throwIfNoEntry: false })` returns `undefined` if it doesn't exist |
+| `fs.lstat(path[, options], callback)` / `lstatSync` | The same, about a symbolic link itself |
+| `fs.fstat(fd[, options], callback)` / `fstatSync` | The same, for a descriptor |
+| `fs.realpath(path[, options], callback)` / `realpathSync` | The canonical absolute path |
+| `fs.access(path[, mode], callback)` / `accessSync` | Fails if `mode` (`fs.constants.R_OK`, ...) isn't allowed |
+| `fs.existsSync(path)` | `true` or `false`, never throws |
+
+`Stats` has `dev`, `ino`, `mode`, `nlink`, `uid`, `gid`, `rdev`, `size`, `blksize`, `blocks`, `atimeMs`, `mtimeMs`, `ctimeMs`, `birthtimeMs`, `atime`, `mtime`, `ctime`, `birthtime`, and the methods `isFile()`, `isDirectory()`, `isSymbolicLink()`, `isFIFO()`, `isSocket()`, `isBlockDevice()`, `isCharacterDevice()`.
+
+### Moving and deleting
+`fs.rename(oldPath, newPath, callback)` / `renameSync`, `fs.copyFile(src, dest[, mode], callback)` / `copyFileSync` (`mode`: `fs.constants.COPYFILE_EXCL` fails if `dest` exists), `fs.unlink(path, callback)` / `unlinkSync`.
+
+### File descriptors
+| Function | |
+|----------|---|
+| `fs.open(path[, flags[, mode]], callback)` / `openSync` | A descriptor |
+| `fs.close(fd[, callback])` / `closeSync` | |
+| `fs.read(fd, buffer[, offset[, length[, position]]], callback)` / `readSync` | Also `(fd, buffer, { offset, length, position })`. Gives the bytes read, 0 at the end of the file. A `position` of `null` reads from the current position |
+| `fs.write(fd, buffer[, offset[, length[, position]]], callback)` / `writeSync` | Gives the bytes written, which can be fewer than given |
+| `fs.write(fd, string[, position[, encoding]], callback)` / `writeSync` | |
+
+`fs.constants` has `F_OK`, `R_OK`, `W_OK`, `X_OK`, `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_CREAT`, `O_TRUNC`, `O_APPEND`, `O_EXCL`, `O_SYNC` and `COPYFILE_EXCL`.
+
+### Streams
+`fs.createReadStream(path[, options])` returns a `ReadStream`, a [Readable](#readable). Options: `encoding`, `start` and `end` (inclusive byte positions), `highWaterMark` (default 64 KB), `flags`, `mode`, `fd` (use this descriptor; `path` is ignored), `autoClose`, `emitClose`. Properties: `path`, `fd`, `flags`, `mode`, `start`, `end`, `autoClose`, `bytesRead`. Events: `'open'` (with the descriptor), `'ready'`, and those of a Readable. `close([callback])` destroys it.
+
+`fs.createWriteStream(path[, options])` returns a `WriteStream`, a [Writable](#writable). Options: `flags` (default `'w'`), `encoding`, `start`, `mode`, `fd`, `autoClose`, `emitClose`, `highWaterMark`. Properties: `path`, `fd`, `flags`, `mode`, `start`, `autoClose`, `bytesWritten`. `close([callback])` ends it.
 
 ```javascript
-const fs = require('fs');
-fs.readFile('config.json', (err, data) => {
-    if (err) {
-        console.error('Failed to read file:', err);
-        return;
-    }
-    console.log('File contents:', data);
-});
+fs.createReadStream('in.log').pipe(fs.createWriteStream('copy.log'));
 ```
 
-### `fs.writeFile(path, data, callback)`
-Write data to file asynchronously.
+### `fs.promises`
+`readFile`, `writeFile`, `appendFile`, `mkdir`, `readdir`, `rmdir`, `rm`, `unlink`, `stat`, `lstat`, `realpath`, `rename`, `copyFile`, `access`: the same arguments without the callback.
 
-**Parameters:**
-- `path` (String): File path
-- `data` (String): Data to write
-- `callback` (Function): `(err) => {}`
-  - `err` (Error | null): Error if occurred
+---
 
-```javascript
-const fs = require('fs');
-fs.writeFile('output.txt', 'Hello, FrogJS!', (err) => {
-    if (err) {
-        console.error('Failed to write file:', err);
-        return;
-    }
-    console.log('File written successfully');
-});
-```
+## Path API
+
+POSIX paths; `require('path')` and `path.posix` are the same object. Non-string arguments throw `ERR_INVALID_ARG_TYPE`.
+
+| Function | |
+|----------|---|
+| `path.join(...paths)` | Join with `/` and normalize (`.` for nothing) |
+| `path.resolve(...paths)` | Right to left, until the result is absolute; then from `process.cwd()` |
+| `path.normalize(path)` | Collapse `.`, `..` and repeated slashes |
+| `path.relative(from, to)` | The relative path between two paths |
+| `path.dirname(path)`, `path.basename(path[, suffix])`, `path.extname(path)` | The parts of a path |
+| `path.isAbsolute(path)` | |
+| `path.parse(path)` | `{ root, dir, base, ext, name }` |
+| `path.format(pathObject)` | The reverse of `parse` |
+| `path.toNamespacedPath(path)` | Returns `path` (it only matters on Windows) |
+| `path.sep`, `path.delimiter` | `'/'`, `':'` |
+| `path.posix` | `path` itself |
+
+---
+
+## OS API
+
+`os.platform()`, `os.arch()`, `os.type()`, `os.release()`, `os.hostname()`, `os.homedir()`, `os.tmpdir()`, `os.totalmem()`, `os.freemem()`, `os.EOL`, and `os.cpus()`, an array of `{ model, speed, times: { user, nice, sys, idle, irq } }`. The values match Node.js's on the same machine.
 
 ---
 
 ## Network API
 
-### `net.createServer(callback)`
-Create a TCP server.
+`net` follows Node.js: sockets are [Duplex](#duplex) streams and servers are [EventEmitters](#events-api).
 
-**Parameters:**
-- `callback` (Function): Connection handler `(socket) => {}`
-  - `socket` (Object): Socket object for the connection
+### `net.createServer([options][, connectionListener])`
+A `Server`. `allowHalfOpen` keeps a connection writable after the peer has ended its side (call `socket.end()` when done). The listener is added for `'connection'`.
 
-**Returns:** Server object
+### Server
+| Member | |
+|--------|---|
+| `server.listen(port[, host][, backlog][, callback])`, `server.listen({ port, host, backlog }[, callback])` | Start listening. Port 0 picks a free port; the host defaults to `'0.0.0.0'` (`'::'` in Node.js). Failures such as `EADDRINUSE` are `'error'` events. Calling it twice throws `ERR_SERVER_ALREADY_LISTEN` |
+| `server.close([callback])` | Stop accepting. `'close'` follows when the existing connections have ended |
+| `server.address()` | `{ address, family, port }`, or `null` when not listening |
+| `server.getConnections(callback)` | `callback(null, count)` |
+| `server.listening` | |
+| `server.maxConnections` | Over this many, new connections are closed and `'drop'` is emitted |
+| `server.ref()`, `server.unref()` | Whether it keeps the process alive |
+
+Events: `'connection'` (socket), `'listening'`, `'close'`, `'error'`, `'drop'`.
+
+### `net.connect(...)`, `net.createConnection(...)`
+`net.connect(port[, host][, listener])` or `net.connect({ port, host, timeout, allowHalfOpen, highWaterMark }[, listener])`. Returns a `Socket` that is connecting. The host defaults to `'localhost'`; names are resolved and each address tried, IPv4 first. A host with a null byte throws `ERR_INVALID_ARG_VALUE`.
+
+### `net.Socket`
+A Duplex stream: `pipe()`, `setEncoding()`, `pause()`, `for await`, and `write()` returning `false` when the kernel can't keep up, followed by `'drain'`. Received data is a Buffer until `setEncoding()` is called.
+
+| Member | |
+|--------|---|
+| `new net.Socket([options])`, `socket.connect(...)` | Same arguments as `net.connect` |
+| `socket.write(data[, encoding][, callback])`, `socket.end([data][, encoding][, callback])` | From Writable. `end()` sends FIN after pending writes |
+| `socket.destroy([err])` | Close at once, discarding pending writes |
+| `socket.destroySoon()` | End after pending writes, then destroy |
+| `socket.setTimeout(ms[, callback])`, `socket.timeout` | Emit `'timeout'` after `ms` of inactivity. The socket stays open: close it yourself |
+| `socket.setNoDelay([enable])`, `socket.setKeepAlive([enable[, delay]])` | TCP options |
+| `socket.address()` | The local `{ address, family, port }`, or `{}` |
+| `socket.localAddress`, `socket.localPort`, `socket.localFamily` | |
+| `socket.remoteAddress`, `socket.remotePort`, `socket.remoteFamily` | |
+| `socket.bytesRead`, `socket.bytesWritten` | |
+| `socket.connecting`, `socket.pending`, `socket.readyState` | `readyState` is `'opening'`, `'open'`, `'readOnly'`, `'writeOnly'` or `'closed'` |
+| `socket.ref()`, `socket.unref()` | Whether it keeps the process alive |
+
+Events: `'connect'`, `'ready'`, `'data'`, `'end'`, `'drain'`, `'timeout'`, `'error'`, and `'close'` with `hadError`. An `'error'` without a listener is an uncaught exception.
+
+Errors have `code`, `errno` and `syscall`, plus `address` and `port` (`connect ECONNREFUSED 127.0.0.1:80`) or `hostname` for failed lookups.
 
 ```javascript
-const net = require('net');
-const server = net.createServer((socket) => {
-    console.log('New connection');
+const server = net.createServer((socket) => socket.pipe(socket));
+server.listen(0, '127.0.0.1', () => {
+  const client = net.connect(server.address().port, '127.0.0.1');
+  client.setEncoding('utf8');
+  client.on('data', (text) => { console.log(text); client.end(); server.close(); });
+  client.write('ribbit');
 });
 ```
 
-### Server Methods
-
-#### `server.listen(port[, host][, callback])`
-Start listening on specified port.
-
-**Parameters:**
-- `port` (Number): Port number (`0` picks a free port)
-- `host` (String): Optional address to bind (default `'0.0.0.0'`)
-- `callback` (Function): Optional callback when listening starts
-
-Throws an `Error` with `code` (e.g. `'EADDRINUSE'`) if the port can't be bound.
-
-```javascript
-server.listen(3000, () => {
-    console.log('Server listening on port 3000');
-});
-```
-
-#### `server.close([callback])`
-Stop accepting connections. `callback` runs once the listening socket is closed.
-
-```javascript
-server.close();
-```
-
-#### `server.address()`
-Returns `{ address, family, port }` for the bound socket.
-
-#### `net.createServer({ allowHalfOpen: true }, callback)`
-Keep a connection writable after the peer has ended its side. Call `socket.end()` when done.
-
-### Socket Events
-
-#### `socket.on('data', callback)`
-Handle incoming data.
-
-**Parameters:**
-- `callback` (Function): `(data) => {}`
-  - `data` (String): Received data
-
-```javascript
-socket.on('data', (data) => {
-    console.log('Received:', data.toString());
-});
-```
-
-#### `socket.on('end', callback)`
-Handle connection end.
-
-**Parameters:**
-- `callback` (Function): `() => {}`
-
-```javascript
-socket.on('end', () => {
-    console.log('Connection ended');
-});
-```
-
-### Socket Methods
-
-#### `socket.write(data)`
-Write data to the socket.
-
-**Parameters:**
-- `data` (String): Data to send
-
-```javascript
-socket.write('Hello, Client!');
-```
-
-#### `socket.write(data, 'latin1')`
-Write a byte string (each character is one byte). `data` may also be a `Buffer`.
-
-#### `socket.end([data])`
-Write `data` (optional), flush pending writes, then close the socket.
-
-```javascript
-socket.end();
-```
-
-#### `socket.destroy()`
-Close the socket immediately, discarding pending writes.
-
-#### `socket.setEncoding(encoding)`
-`'utf8'` (default) or `'latin1'`/`'binary'` to receive data as byte strings.
-
-#### `socket.on('close', callback)`
-Emitted once the socket is fully closed, for both client and server sockets.
-
-#### `socket.remoteAddress` / `socket.remotePort`
-Address of the peer.
-
-### `net.connect(port, host, callback)`
-Create TCP client connection.
-
-**Parameters:**
-- `port` (Number): Port number
-- `host` (String): Hostname or IP address (default: '127.0.0.1'). Hostnames are resolved via DNS; IPv4 addresses are tried first
-- `callback` (Function): Optional connection callback
-
-**Returns:** Socket object
-
-```javascript
-const net = require('net');
-const client = net.connect(3000, 'localhost', () => {
-    console.log('Connected to server');
-    client.write('Hello, Server!');
-});
-```
-
-### Client Socket Events
-
-#### `socket.on('data', callback)`
-Handle incoming data from server.
-
-```javascript
-client.on('data', (data) => {
-    console.log('Server says:', data.toString());
-});
-```
-
-#### `socket.on('connect', callback)`
-Handle successful connection.
-
-```javascript
-client.on('connect', () => {
-    console.log('Connected!');
-});
-```
-
-#### `socket.on('error', callback)`
-Handle connection errors. `err.code` is e.g. `'ECONNREFUSED'` or `'EAI_NONAME'`.
-
-```javascript
-client.on('error', (err) => {
-    console.error('Connection error:', err);
-});
-```
-
-#### `socket.on('end', callback)`
-Handle connection end.
-
-```javascript
-client.on('end', () => {
-    console.log('Disconnected from server');
-});
-```
+### `net.isIP(input)`, `net.isIPv4(input)`, `net.isIPv6(input)`
+4, 6, or 0 if it isn't an IP address; booleans.
 
 ---
 
@@ -585,6 +523,7 @@ Close idle keep-alive connections, or every connection immediately.
 - `server.listening` (Boolean)
 - `server.keepAliveTimeout` (Number): Idle time before a keep-alive connection is closed (default 5000 ms)
 - `server.headersTimeout` (Number): Time allowed to receive request headers (default 60000 ms)
+- `server.requestTimeout` (Number): Time allowed to receive a whole request, body included, after its headers; the client gets a `408` (default 300000 ms, 0 turns it off)
 
 #### Events
 - `'request'` `(req, res)`: A request's headers have arrived
@@ -636,6 +575,8 @@ http.createServer((req, res) => {
 ```
 
 ### ServerResponse
+`ServerResponse` and `ClientRequest` extend `http.OutgoingMessage`. Their `write()` returns `false` when the socket is full, followed by `'drain'`, like any Writable.
+
 
 #### `res.statusCode` / `res.statusMessage`
 Status sent with the headers (default `200` and the standard reason phrase).
@@ -779,6 +720,9 @@ Call each listener synchronously, in order, with `args` and `this` set to the em
 - `emitter.setMaxListeners(n)` / `emitter.getMaxListeners()`: Above this count a `MaxListenersExceededWarning` is printed once per event (0 = unlimited)
 - `EventEmitter.defaultMaxListeners`: Default limit (10)
 
+### `events.getEventListeners(emitter, name)`
+A copy of the listeners for `name`, like `emitter.listeners(name)`.
+
 ### Special events
 - `'error'`: If nothing listens, `emit('error', err)` throws `err` (or an `ERR_UNHANDLED_ERROR` error for non-`Error` values)
 - `EventEmitter.errorMonitor`: Listeners for this symbol see every `'error'` before the regular listeners, without counting as handlers
@@ -916,6 +860,8 @@ Buffer writes until `uncork()`, then pass them to `_writev()` in one call if it 
 Both readable and writable, with independent sides: implement `_read()` and `_write()`. Options can be set per side with `readableHighWaterMark`/`writableHighWaterMark` and `readableObjectMode`/`writableObjectMode`. With `allowHalfOpen: false`, the writable side ends when the readable side ends. A `Duplex` is `instanceof` both `Readable` and `Writable`.
 
 ### Transform
+A subclass implements `_transform(chunk, encoding, callback)` and optionally `_flush(callback)` (or passes them as options). `crypto.Hash` and `crypto.Hmac` are Transform streams with their own `_transform`.
+
 A Duplex whose output is computed from its input.
 
 ```javascript
@@ -935,6 +881,9 @@ When the readable side is full, `transform()` is not called again until the outp
 
 ### PassThrough
 A Transform that outputs its input unchanged.
+
+### `stream.isReadable(stream)`, `stream.isErrored(stream)`, `stream.getEventListeners(emitter, name)`
+Whether a stream can still be read; whether it has failed; the listeners for an event (the same function as in `events`).
 
 ### `stream.pipeline(source, ...transforms, destination, callback)`
 Pipe the streams together. If any stream fails, all of them are destroyed. `callback(err)` runs once, after every stream has finished or closed. `source` may also be an iterable or async iterable. Returns `destination`.
@@ -956,6 +905,53 @@ Call `callback(err)` once the stream has ended (readable), finished (writable), 
 
 ### `stream.promises.pipeline(...)` / `stream.promises.finished(stream[, options])`
 Promise versions of `pipeline()` and `finished()`.
+
+---
+
+## Buffer API
+
+`Buffer` is a global (also `require('buffer').Buffer`) and a subclass of `Uint8Array`: it can be indexed and iterated, and works anywhere a `Uint8Array` does. Memory belongs to V8 and is freed with the last Buffer or view using it. New memory is always zero-filled, including `allocUnsafe`.
+
+### Creating
+| Function | |
+|----------|---|
+| `Buffer.alloc(size[, fill[, encoding]])` | A zero-filled Buffer, or filled with `fill`. A bad size throws `ERR_OUT_OF_RANGE` |
+| `Buffer.allocUnsafe(size)`, `Buffer.allocUnsafeSlow(size)` | Zero-filled too. `allocUnsafe` may come from a shared 8 KB pool (`Buffer.poolSize`), `allocUnsafeSlow` never does |
+| `Buffer.from(string[, encoding])` | Encode a string (default UTF-8) |
+| `Buffer.from(arrayBuffer[, byteOffset[, length]])` | A **view** of that memory |
+| `Buffer.from(array \| typedArray \| buffer \| dataView \| sharedArrayBuffer)` | A copy. Array and typed array elements wrap modulo 256 |
+| `Buffer.concat(list[, totalLength])` | Join into a new Buffer, truncated or zero-padded to `totalLength` |
+| `new Buffer(...)` | Deprecated, as in Node.js: use `alloc` and `from` |
+
+Small Buffers from `from()`, `concat()` and `allocUnsafe()` share a block, so `buf.buffer` can be larger than the Buffer: use `buf.byteOffset` and `buf.length` with it, and don't transfer it to a worker.
+
+### Class methods
+`Buffer.isBuffer(value)`, `Buffer.isEncoding(name)`, `Buffer.byteLength(stringOrBinary[, encoding])`, `Buffer.compare(a, b)` (-1, 0, 1).
+
+### Instance methods
+| Method | |
+|--------|---|
+| `buf.toString([encoding[, start[, end]]])`, `buf.toLocaleString()` | Decode; invalid UTF-8 becomes U+FFFD. A result over V8's string limit throws `ERR_STRING_TOO_LONG` |
+| `buf.toJSON()` | `{ type: 'Buffer', data: [...] }`, which `Buffer.from` accepts |
+| `buf.write(string[, offset[, length]][, encoding])` | Returns the bytes written. A character that doesn't fit isn't written partly |
+| `buf.slice([start[, end]])`, `buf.subarray([start[, end]])` | **Views** of the same memory |
+| `buf.equals(other)`, `buf.compare(target[, targetStart[, targetEnd[, sourceStart[, sourceEnd]]]])` | |
+| `buf.copy(target[, targetStart[, sourceStart[, sourceEnd]]])` | Returns the bytes copied |
+| `buf.fill(value[, offset[, end]][, encoding])` | |
+| `buf.indexOf(value[, byteOffset][, encoding])`, `buf.lastIndexOf(...)`, `buf.includes(...)` | `value` is a string, byte or Buffer |
+
+### Inherited from Uint8Array
+`length`, `buffer`, `byteOffset`, `byteLength`, `at`, `copyWithin`, `entries`, `every`, `filter`, `find`, `findIndex`, `findLast`, `findLastIndex`, `forEach`, `join`, `keys`, `map`, `reduce`, `reduceRight`, `reverse`, `set`, `some`, `sort`, `toReversed`, `toSorted`, `valueOf`, `values`, `with`.
+
+### Numbers
+All take an `offset` (default 0) and throw `ERR_OUT_OF_RANGE` outside the Buffer; writes also check the value and return the offset after it. `UInt` methods are also spelled `Uint`.
+
+`readUInt8`, `readInt8`, `writeUInt8`, `writeInt8`;
+`readUInt16LE`, `readUInt16BE`, `readInt16LE`, `readInt16BE`, `writeUInt16LE`, `writeUInt16BE`, `writeInt16LE`, `writeInt16BE`;
+`readUInt32LE`, `readUInt32BE`, `readInt32LE`, `readInt32BE`, `writeUInt32LE`, `writeUInt32BE`, `writeInt32LE`, `writeInt32BE`;
+`readBigUInt64LE`, `readBigUInt64BE`, `readBigInt64LE`, `readBigInt64BE`, `writeBigUInt64LE`, `writeBigUInt64BE`, `writeBigInt64LE`, `writeBigInt64BE`;
+`readFloatLE`, `readFloatBE`, `writeFloatLE`, `writeFloatBE`, `readDoubleLE`, `readDoubleBE`, `writeDoubleLE`, `writeDoubleBE`;
+`readUint8`, `writeUint8`, `readUint16LE`, `readUint16BE`, `writeUint16LE`, `writeUint16BE`, `readUint32LE`, `readUint32BE`, `writeUint32LE`, `writeUint32BE`, `readBigUint64LE`, `readBigUint64BE`, `writeBigUint64LE`, `writeBigUint64BE`.
 
 ---
 
@@ -1080,98 +1076,62 @@ Returns the supported hash names.
 
 ## Module System
 
+CommonJS, following Node.js's algorithm. ES modules (`import`) aren't supported; TypeScript or a bundler can compile them to CommonJS.
+
 ### `require(id)`
-Load modules.
+1. **Built-in**: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`, `child_process`, `worker_threads`, `buffer`, `timers`, `process`, `module`, optionally with a `node:` prefix. An unknown `node:` name throws `ERR_UNKNOWN_BUILTIN_MODULE`.
+2. **A path** (`./`, `../`, `/`), from the requiring module's directory: the exact file, then with `.js` and `.json`, then as a directory: `package.json`'s `main`, then `index.js` and `index.json`.
+3. **A package**: the same in `node_modules` of the module's directory and each parent, including scoped names (`@scope/pkg`) and subpaths (`pkg/lib/x`). `package.json`'s `exports` is honored for exact subpaths and the `require`, `node` and `default` conditions (not patterns with `*`). A subpath it doesn't list throws `ERR_PACKAGE_PATH_NOT_EXPORTED`, and a target leaving the package throws `ERR_INVALID_PACKAGE_TARGET`.
 
-**Parameters:**
-- `id` (String): Module identifier
+Not found throws `MODULE_NOT_FOUND` with `requireStack`. `.json` files are parsed; anything else runs as JavaScript in a function, so top-level `var` stays private and top-level `return` works. A leading BOM and `#!` line are ignored.
 
-**Returns:** Module exports
+### `require.resolve(id)`, `require.cache`, `require.main`
+The file `id` would load (or the name of a built-in); loaded modules by file name (delete an entry to load it again); the main module.
 
-**Module Resolution:**
-1. Built-in modules: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`, `child_process`, `worker_threads`
-2. Relative paths (`./`, `../`), resolved from the directory of the module that calls `require()`
-3. Absolute paths
-4. Auto-append `.js` extension
-5. Auto-append `/index.js` for directories
+### `module`, `exports`
+`module.exports` is what `require()` returns and can be any value; `exports` starts as the same object, and is `this` at the top level. A module also has `id`, `path`, `filename`, `loaded`, `children`, `paths`, `parent` and `require(id)`.
 
-```javascript
-// Relative path
-const utils = require('./utils');
+### Caching and cycles
+A module runs once per file. It is cached before it runs, so a circular `require()` gets its **partial** exports, as they are at that moment. A module that throws isn't kept: requiring it again runs it again.
 
-// Directory with index.js
-const module = require('./my-module');
+### Errors in modules
+Exceptions propagate to the caller of `require()`; uncaught ones are reported with the module's file and line.
 
-// Nested path
-const nested = require('../parent/module');
-```
-
-### `module.exports`
-Export values from module. Any value can be exported. The main script has `module` and `exports` too (so TypeScript's CommonJS output runs as the entry point), but nothing can `require()` it.
-
-```javascript
-// Export object
-module.exports = {
-    foo: 'bar',
-    func: () => {}
-};
-
-// Export single value
-module.exports = 'my value';
-
-// Export function
-module.exports = () => {
-    console.log('Hello!');
-};
-```
-
-### Errors in Modules
-An error thrown while a module loads propagates to the `require()` call, so it can be caught; uncaught, it is reported with the module's file and line.
-
-```javascript
-try {
-    require('./broken');
-} catch (err) {
-    console.error('Could not load module:', err.message);
-}
-```
-
-### Module Caching
-Modules are cached after first load. Subsequent `require()` calls return the cached module.
-
-```javascript
-// First call loads and executes module
-const mod1 = require('./module');
-
-// Second call returns cached module
-const mod2 = require('./module');
-
-console.log(mod1 === mod2); // true
-```
+### `require('module')`
+`builtinModules` lists the built-in names. `createRequire(filename)` returns a `require` that resolves from that file.
 
 ---
 
 ## Error Handling
 
-### Try-Catch in JavaScript
+### Exceptions and callbacks
+Synchronous failures throw; asynchronous ones go to the callback's first argument or a promise rejection, as `Error` objects with `code`.
+
 ```javascript
 try {
-    const data = fs.readFileSync('file.txt');
+  fs.readFileSync('missing.txt');
 } catch (err) {
-    console.error('Error:', err.message);
+  console.error(err.code);    // 'ENOENT'
 }
-```
 
-### Error Callbacks
-```javascript
-fs.readFile('file.txt', (err, data) => {
-    if (err) {
-        console.error('Error:', err.message);
-        return;
-    }
-    console.log('Success:', data);
+fs.readFile('missing.txt', (err, data) => {
+  if (err) return console.error(err.message);
 });
 ```
+
+### Uncaught errors
+An exception nobody catches, or a rejected promise without a handler after the microtasks ran, prints a report to stderr (`file:line`, the source line, the stack) and ends the process with exit code 1, wherever it happened: the main script, a timer, an fs callback, a socket event. Exit codes:
+
+| Code | Meaning |
+|------|---------|
+| 0 | Normal end, or `process.exitCode` otherwise |
+| 1 | Uncaught exception or unhandled rejection |
+| 7 | An `'uncaughtException'` or `'exit'` listener threw |
+| 9 | Invalid command-line option |
+
+`process.on('uncaughtException', ...)` and `process.on('unhandledRejection', ...)` take over. On a worker thread the error ends the worker and becomes the `Worker`'s `'error'` event. In the REPL it is printed and the session goes on.
+
+HTTP handlers are a deliberate exception: a `'request'` listener that throws has the error printed and the client gets a `500`, because one bad request shouldn't end a server. See [HTTP API](#http-api).
 
 ---
 
@@ -1214,24 +1174,17 @@ server.listen(3000, () => {
 ```
 
 ### File Operations
+
 ```javascript
-const fs = require('fs');
+fs.mkdirSync('data', { recursive: true });
+fs.writeFileSync('data/notes.txt', 'first line\n');
+fs.appendFileSync('data/notes.txt', 'second line\n');
+console.log(fs.readFileSync('data/notes.txt', 'utf8'));
 
-// Async read and write
-fs.readFile('input.txt', (err, data) => {
-    if (err) {
-        console.error('Read error:', err);
-        return;
-    }
-
-    fs.writeFile('output.txt', data.toUpperCase(), (err) => {
-        if (err) {
-            console.error('Write error:', err);
-            return;
-        }
-        console.log('File processed successfully');
-    });
-});
+for (const entry of fs.readdirSync('data', { withFileTypes: true })) {
+  console.log(entry.name, entry.isFile() ? 'file' : 'other', fs.statSync('data/' + entry.name).size);
+}
+fs.rmSync('data', { recursive: true });
 ```
 
 ### Module Usage
@@ -1258,7 +1211,7 @@ console.log(math.add(1, 2)); // 3
 ---
 
 **Last Updated:** 2026-10-16
-**API Version:** 0.5.0
+**API Version:** 1.0.0
 
 ---
 

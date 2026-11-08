@@ -38,7 +38,7 @@ check_contains() {
 
 echo "Flags"
 check "--version" "$("$FROGJS" -v)" "$("$FROGJS" --version)"
-check_contains "--version format" "v0." "$("$FROGJS" --version)"
+check_contains "--version format" "v1." "$("$FROGJS" --version)"
 check_contains "--help" "Usage: frogjs" "$("$FROGJS" --help)"
 check "--eval" "3" "$("$FROGJS" --eval 'console.log(1 + 2)')"
 check "-e passes arguments" "a,b" "$("$FROGJS" -e 'console.log(process.argv.slice(1).join())' a b)"

@@ -1,4 +1,5 @@
 #include "frogjs/repl.h"
+#include "frogjs/errors.h"
 #include "frogjs/line_editor.h"
 #include "frogjs/util.h"
 #include "frogjs/version.h"
@@ -22,7 +23,6 @@
 
 using namespace v8;
 
-void ClearModuleCache();
 
 namespace {
 
@@ -290,7 +290,6 @@ void ResetContext() {
     HandleScope handle_scope(isolate);
     g_repl->context.Reset(isolate, g_repl->new_context(isolate));
     g_repl->declared.clear();
-    ClearModuleCache();
     // StartREPL's loop enters the new context before running the event loop again
     uv_stop(uv_default_loop());
 }
@@ -663,6 +662,7 @@ int StartREPL(Isolate* isolate, Local<Context> context, ContextFactory new_conte
     state.terminal = isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
     state.colors = state.terminal && getenv("NO_COLOR") == nullptr;
     state.running = true;
+    SetReplActive(true);
 
     uv_loop_t* loop = uv_default_loop();
     if (uv_poll_init(loop, &state.stdin_poll, STDIN_FILENO) == 0) {
@@ -698,9 +698,11 @@ int StartREPL(Isolate* isolate, Local<Context> context, ContextFactory new_conte
         HandleScope handle_scope(isolate);
         Local<Context> current = state.context.Get(isolate);
         Context::Scope context_scope(current);
-        uv_run(loop, UV_RUN_DEFAULT);
+        uv_run(loop, UV_RUN_ONCE);
+        DrainTasks(isolate);
     }
 
+    SetReplActive(false);
     state.editor.reset();
     state.context.Reset();
     g_repl = nullptr;

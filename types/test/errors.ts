@@ -8,32 +8,41 @@ import crypto = require('crypto');
 import net = require('net');
 
 export function mistakes(): void {
-    // @ts-expect-error  Stats.isDirectory is a boolean in FrogJS, not a method
-    fs.statSync('.').isDirectory();
-    // @ts-expect-error  fs errors are strings: no .code
-    fs.readFile('x', (err) => err?.code);
-    // @ts-expect-error  readFileSync takes no encoding (it always returns a string)
-    fs.readFileSync('x', 'utf8');
-    // @ts-expect-error  fs.promises doesn't exist
-    fs.promises.readFile('x');
-    // @ts-expect-error  Buffers can't be indexed
-    Buffer.from('a')[0];
-    // @ts-expect-error  setTimeout needs a delay
-    setTimeout(() => {});
-    // @ts-expect-error  no unref() on timer IDs
-    setTimeout(() => {}, 1).unref();
+    // @ts-expect-error  Stats.isDirectory is a method, not a boolean
+    const isDirectory: boolean = fs.statSync('.').isDirectory;
+    // @ts-expect-error  fs errors have no .nope
+    fs.readFile('x', (err) => err?.nope);
+    // @ts-expect-error  without an encoding the result is a Buffer
+    const text: string = fs.readFileSync('x');
+    // @ts-expect-error  with an encoding the result is a string
+    const bytes: Buffer = fs.readFileSync('x', 'utf8');
+    // @ts-expect-error  fs.promises has no readFileSync
+    fs.promises.readFileSync('x');
+    // @ts-expect-error  Buffer elements are numbers
+    const element: string = Buffer.from('a')[0];
+    // @ts-expect-error  timers need a function
+    setTimeout('code', 1);
+    // @ts-expect-error  a Timeout isn't a number
+    const id: number = setTimeout(() => {}, 1);
+    // @ts-expect-error  net.connect needs a port
+    net.connect();
     // @ts-expect-error  digest() without an encoding is a Buffer
     const hex: string = crypto.createHash('md5').update('a').digest();
-    // @ts-expect-error  sockets aren't streams
-    net.connect(80).pipe(process.stdout);
+    // @ts-expect-error  sockets have no send()
+    net.connect(80).send('x');
     // @ts-expect-error  kill() takes a signal name or number
     spawn('ls').kill('TERM_PLEASE');
     // @ts-expect-error  terminate() returns a Promise, not a number
     const code: number = new Worker('0', { eval: true }).terminate();
-    // @ts-expect-error  process isn't an EventEmitter in FrogJS
-    process.on('exit', () => {});
+    // @ts-expect-error  no process.binding
+    process.binding('fs');
     // @ts-expect-error  no DOM: fetch doesn't exist
     fetch('http://example.com');
     void hex;
     void code;
+    void isDirectory;
+    void text;
+    void bytes;
+    void element;
+    void id;
 }

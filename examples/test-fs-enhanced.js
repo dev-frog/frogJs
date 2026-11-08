@@ -12,8 +12,8 @@ console.log('testdir exists:', fs.existsSync('testdir'));
 console.log('\n--- statSync test ---');
 const stats = fs.statSync('testdir');
 console.log('testdir stats:');
-console.log('  isDirectory:', stats.isDirectory);
-console.log('  isFile:', stats.isFile);
+console.log('  isDirectory:', stats.isDirectory());
+console.log('  isFile:', stats.isFile());
 console.log('  size:', stats.size);
 
 // Test 3: fs.writeFileSync and fs.statSync for files
@@ -21,8 +21,8 @@ console.log('\n--- file stat test ---');
 fs.writeFileSync('testdir/test.txt', 'Hello, Enhanced FS!');
 const fileStats = fs.statSync('testdir/test.txt');
 console.log('testdir/test.txt stats:');
-console.log('  isDirectory:', fileStats.isDirectory);
-console.log('  isFile:', fileStats.isFile);
+console.log('  isDirectory:', fileStats.isDirectory());
+console.log('  isFile:', fileStats.isFile());
 console.log('  size:', fileStats.size);
 
 // Test 4: fs.readdirSync
@@ -59,7 +59,7 @@ fs.mkdir('async-test-dir', 0o755, (err) => {
             if (err) {
                 console.log('stat error:', err);
             } else {
-                console.log('stat async: isDirectory =', stats.isDirectory);
+                console.log('stat async: isDirectory =', stats.isDirectory());
 
                 // Async readdir
                 fs.readdir('async-test-dir', (err, files) => {

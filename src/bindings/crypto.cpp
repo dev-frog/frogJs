@@ -11,6 +11,8 @@
 #include "frogjs/js_module.h"
 #include "frogjs/v8_compat.h"
 
+#include <unordered_set>
+
 using namespace v8;
 
 // The crypto module's API is written in JavaScript on top of the native
@@ -324,10 +326,24 @@ struct DigestHandle {
 
 thread_local Persistent<ObjectTemplate> g_handle_template;
 
+// Digests still alive when the thread ends: their weak callbacks never run
+thread_local std::unordered_set<DigestHandle*> tls_digests;
+thread_local bool tls_cleanup_registered = false;
+
 void OnHandleCollected(const WeakCallbackInfo<DigestHandle>& info) {
     DigestHandle* handle = info.GetParameter();
     handle->object.Reset();
+    tls_digests.erase(handle);
     delete handle;
+}
+
+void CleanupDigests() {
+    for (DigestHandle* handle : tls_digests) {
+        handle->object.Reset();
+        delete handle;
+    }
+    tls_digests.clear();
+    tls_cleanup_registered = false;
 }
 
 Local<Object> WrapDigest(Isolate* isolate, Local<Context> context, std::unique_ptr<frogjs::Digest> digest) {
@@ -335,6 +351,7 @@ Local<Object> WrapDigest(Isolate* isolate, Local<Context> context, std::unique_p
     DigestHandle* handle = new DigestHandle{std::move(digest), Global<Object>(isolate, object)};
     object->SetInternalField(0, frogjs::NewExternal(isolate, handle));
     handle->object.SetWeak(handle, OnHandleCollected, WeakCallbackType::kParameter);
+    tls_digests.insert(handle);
     return object;
 }
 
@@ -376,7 +393,7 @@ void CallBack(Isolate* isolate, Global<Context>& saved_context, Global<Function>
     Local<Value> ignored;
     if (!saved_callback.Get(isolate)->Call(context, Undefined(isolate), 2, argv).ToLocal(&ignored) &&
         try_catch.HasCaught()) {
-        frogjs::ReportException(isolate, &try_catch);
+        frogjs::HandleUncaught(isolate, &try_catch);
     }
 }
 
@@ -423,6 +440,9 @@ void DigestUpdate(const FunctionCallbackInfo<Value>& args) {
         frogjs::Encoding encoding;
         if (!frogjs::GetEncodingArg(isolate, args[2], frogjs::Encoding::kUtf8, &encoding)) return;
         digest->Update(frogjs::DecodeString(isolate, args[1].As<String>(), encoding));
+    } else if (args[1]->IsArrayBufferView()) {
+        BufferData bytes = GetBufferData(args[1].As<Object>());
+        if (bytes.length > 0) digest->Update(reinterpret_cast<const uint8_t*>(bytes.data), bytes.length);
     } else {
         std::string bytes;
         frogjs::GetBinaryData(args[1], &bytes);
@@ -570,6 +590,10 @@ void SetupCrypto(Isolate* isolate, Local<Context> context) {
     Local<ObjectTemplate> handle_template = ObjectTemplate::New(isolate);
     handle_template->SetInternalFieldCount(1);
     g_handle_template.Reset(isolate, handle_template);
+    if (!tls_cleanup_registered) {
+        tls_cleanup_registered = true;
+        frogjs::AddThreadCleanup(CleanupDigests);
+    }
 
     Local<Value> stream = context->Global()->Get(context, String::NewFromUtf8Literal(isolate, "stream")).ToLocalChecked();
     if (!stream->IsObject()) {

@@ -36,6 +36,8 @@ declare module 'http' {
         keepAliveTimeout: number;
         /** Time allowed to receive request headers (default 60000 ms). */
         headersTimeout: number;
+        /** Time to receive a whole request after its headers (default 300000 ms, 0: none). */
+        requestTimeout: number;
         maxHeaderSize: number;
 
         /** Port 0 (the default) picks a free port; host defaults to `'0.0.0.0'`. Failures are 'error' events. */

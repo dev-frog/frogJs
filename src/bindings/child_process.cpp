@@ -26,6 +26,9 @@ const signals = native.signals;
 const signalNames = Object.create(null);
 for (const name of Object.keys(signals)) signalNames[signals[name]] = name;
 
+// Captured now: scripts can replace the global
+const scheduleImmediate = setImmediate;
+
 function nextTick(fn, ...args) {
   Promise.resolve().then(() => fn(...args));
 }
@@ -108,6 +111,17 @@ function normalizeSpawnArguments(file, args, options) {
     cwd = undefined;
   }
 
+  // C strings end at a null byte: a truncated argument isn't what the caller checked
+  const checkNoNull = (name, value) => {
+    if (typeof value === 'string' && value.includes('\0')) {
+      throw makeError(TypeError, 'ERR_INVALID_ARG_VALUE',
+        `The argument '${name}' must be a string without null bytes. Received ${JSON.stringify(value)}`);
+    }
+  };
+  checkNoNull('file', file);
+  checkNoNull('options.cwd', cwd);
+  args.forEach((arg, i) => checkNoNull(`args[${i}]`, arg));
+
   if (options.shell) {
     const command = [file, ...args].join(' ');
     file = typeof options.shell === 'string' ? options.shell : '/bin/sh';
@@ -120,7 +134,11 @@ function normalizeSpawnArguments(file, args, options) {
   const env = options.env || process.env;
   const envPairs = [];
   for (const key of Object.keys(env)) {
-    if (env[key] !== undefined) envPairs.push(`${key}=${env[key]}`);
+    if (env[key] !== undefined) {
+      const pair = `${key}=${env[key]}`;
+      checkNoNull('options.env', pair);
+      envPairs.push(pair);
+    }
   }
 
   return {
@@ -285,7 +303,9 @@ class ChildProcess extends EventEmitter {
       nextTick(() => {
         this.emit('error', err);
         this.exitCode = result;
-        this._maybeClose();
+        // 'close' comes on a later turn of the event loop, so code that reacts
+        // to 'error' can still add a listener for it (as in Node.js)
+        scheduleImmediate(() => this._maybeClose());
       });
       return result;
     }
@@ -735,7 +755,7 @@ void CallMethod(Isolate* isolate, Local<Context> context, Local<Object> object, 
     if (!object->Get(context, V8String(isolate, name)).ToLocal(&method) || !method->IsFunction()) return;
     Local<Value> ignored;
     if (!method.As<Function>()->Call(context, object, argc, argv).ToLocal(&ignored) && try_catch.HasCaught()) {
-        frogjs::ReportException(isolate, &try_catch);
+        frogjs::HandleUncaught(isolate, &try_catch);
     }
 }
 
@@ -743,7 +763,7 @@ void CallFunction(Isolate* isolate, Local<Context> context, Local<Function> func
     TryCatch try_catch(isolate);
     Local<Value> ignored;
     if (!function->Call(context, Undefined(isolate), argc, argv).ToLocal(&ignored) && try_catch.HasCaught()) {
-        frogjs::ReportException(isolate, &try_catch);
+        frogjs::HandleUncaught(isolate, &try_catch);
     }
 }
 

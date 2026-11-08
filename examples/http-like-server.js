@@ -1,5 +1,6 @@
 // Simple HTTP-like Server Example
 const server = net.createServer((socket) => {
+    socket.setEncoding('utf8');
     console.log('New connection');
 
     socket.on('data', (request) => {

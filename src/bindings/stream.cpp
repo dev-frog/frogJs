@@ -31,10 +31,35 @@ function reportError(err) {
 }
 
 // Run fn(...args) after the current operation (V8 runs microtasks after each callback)
+const tickQueue = [];
+let tickHead = 0;
+let tickScheduled = false;
+
+function runTicks() {
+  try {
+    while (tickHead < tickQueue.length) {
+      const fn = tickQueue[tickHead];
+      const args = tickQueue[tickHead + 1];
+      tickHead += 2;
+      if (args === null) fn();
+      else fn(...args);
+    }
+    tickQueue.length = 0;
+    tickHead = 0;
+    tickScheduled = false;
+  } catch (err) {
+    // The error goes on to the uncaught handler; the rest still runs
+    Promise.resolve().then(runTicks);
+    throw err;
+  }
+}
+
 function nextTick(fn, ...args) {
-  Promise.resolve().then(() => {
-    try { fn(...args); } catch (err) { reportError(err); }
-  });
+  tickQueue.push(fn, args.length === 0 ? null : args);
+  if (!tickScheduled) {
+    tickScheduled = true;
+    Promise.resolve().then(runTicks);
+  }
 }
 
 function makeError(Ctor, code, message) {
@@ -1706,10 +1731,15 @@ function stdioStream(fd) {
   // Closing the process's stdout would break console.log
   s._destroy = (err, callback) => callback(err);
   s.end = function (chunk, encoding, callback) {
-    if (typeof chunk === 'function') return chunk();
+    if (typeof chunk === 'function') {
+      callback = chunk;
+      chunk = undefined;
+    } else if (typeof encoding === 'function') {
+      callback = encoding;
+      encoding = undefined;
+    }
     if (chunk !== undefined && chunk !== null) this.write(chunk, encoding);
-    if (typeof encoding === 'function') encoding();
-    else if (typeof callback === 'function') callback();
+    if (typeof callback === 'function') callback();
     return this;
   };
   return s;

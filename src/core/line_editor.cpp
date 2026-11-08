@@ -1,4 +1,5 @@
 #include "frogjs/line_editor.h"
+#include <fcntl.h>
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -299,11 +300,14 @@ void LineEditor::LoadHistory(const std::string& path) {
 }
 
 void LineEditor::SaveHistory(const std::string& path) const {
+    // History can hold secrets: the file is private from the moment it exists
+    int fd = open(path.c_str(), O_WRONLY | O_CREAT, 0600);
+    if (fd < 0) return;
+    close(fd);
+    chmod(path.c_str(), 0600);
     std::ofstream file(path, std::ios::trunc);
     if (!file.is_open()) return;
     for (const std::string& line : history_) file << line << "\n";
-    file.close();
-    chmod(path.c_str(), 0600);
 }
 
 size_t LineEditor::Columns() const {

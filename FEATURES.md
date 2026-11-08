@@ -19,45 +19,36 @@ FrogJS is a lightweight JavaScript runtime built on V8 and libuv, providing Node
 - Arguments are formatted with `util.format`: objects are pretty-printed (`{ a: 1 }`, `[ 1, 2 ]`) and `%s %d %i %f %j %o %O %c %%` are supported
 
 ### 3. Timer API
-- `setTimeout(callback, delay)` - Execute callback after delay
-- `setInterval(callback, delay)` - Execute callback repeatedly
-- `clearTimeout(id)` - Cancel timeout
-- `clearInterval(id)` - Cancel interval
+- ✅ `setTimeout`, `setInterval`, `setImmediate` (with extra arguments), and their `clear*` functions
+- ✅ `Timeout` and `Immediate` objects: `ref()`, `unref()`, `hasRef()`, `refresh()`, `close()`
+- ✅ `process.nextTick`, `queueMicrotask`
 
 ### 4. File System API
-
-#### Synchronous Operations
-- `fs.readFileSync(path)` - Read file contents synchronously
-- `fs.writeFileSync(path, data)` - Write file synchronously
-
-#### Asynchronous Operations
-- `fs.readFile(path, callback)` - Read file asynchronously
-- `fs.writeFile(path, data, callback)` - Write file asynchronously
+- ✅ Whole files: `readFile`, `writeFile`, `appendFile`, binary-safe, with encodings and flags
+- ✅ Directories: `mkdir` (with `recursive`), `readdir` (with `withFileTypes`), `rmdir`, `rm` (with `recursive`, `force`)
+- ✅ Metadata: `stat`, `lstat`, `fstat`, `realpath`, `access`, `existsSync`; `Stats` and `Dirent` classes
+- ✅ `rename`, `copyFile`, `unlink`
+- ✅ Descriptors: `open`, `close`, `read`, `write`
+- ✅ Streams: `createReadStream`, `createWriteStream`
+- ✅ `fs.promises`; sync, callback and promise forms behave the same
+- ✅ Errors are `Error` objects with `code`, `errno`, `syscall`, `path`
 
 ### 5. Network API (TCP)
-- **TCP Server**: `net.createServer(callback)`
-  - `server.listen(port, callback)` - Start listening
-  - `server.close()` - Close server
-
-  - `server.address()` - `{ address, family, port }` (useful after `listen(0)`)
-  - `net.createServer({ allowHalfOpen: true }, callback)` - Keep writing after the peer ends
-
-- **TCP Client**: `net.connect(port[, host][, callback])` - Resolves hostnames (DNS), IPv4 and IPv6
-  - `socket.write(data[, encoding])` - Write a string or Buffer (`'latin1'` writes raw bytes)
-  - `socket.end([data])` - Flush pending writes, then close
-  - `socket.destroy()` - Close immediately
-  - `socket.setEncoding('latin1')` - Receive data as byte strings
-  - `socket.on(event, callback)` - `connect`, `data`, `end`, `error`, `close`
-  - `socket.remoteAddress` / `socket.remotePort`
+- ✅ `net.Socket`: a Duplex stream, with backpressure in both directions
+- ✅ `net.Server`: an EventEmitter, `listen()` with options, `close()` waiting for connections, `maxConnections`, `getConnections()`
+- ✅ `net.connect` / `createConnection`: DNS resolution, trying each address
+- ✅ `setTimeout`, `setNoDelay`, `setKeepAlive`, `ref`, `unref`, addresses and byte counts
+- ✅ `net.isIP`, `isIPv4`, `isIPv6`
+- ✅ Errors with `code`, `errno`, `syscall`, `address`, `port`
 
 ### 6. Module System
-- **CommonJS Support**: `require()` and `module.exports`
-- **Module Caching**: Modules loaded once per session
-- **Relative Paths**: Support for `./` and `../` imports, resolved from the requiring module's directory
-- **Any Export**: `module.exports` can be any value; the main script has `module`/`exports` too
-- **Index Files**: Automatic `index.js` resolution
-- **File Extension Resolution**: `.js` extension auto-detection
-- **Built-in Modules**: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`, `child_process`, `worker_threads`
+- ✅ `require()` following Node.js's algorithm: files, `.json`, directories, `node_modules`, scoped packages
+- ✅ `package.json`: `main`, and `exports` for exact subpaths and conditions
+- ✅ `node:` prefix; `buffer`, `timers`, `process`, `module` as modules
+- ✅ `require.resolve`, `require.cache`, `require.main`, `createRequire`, `module.paths`, ...
+- ✅ Circular requires get partial exports; failed modules aren't cached
+- ✅ The main script is a module (top-level `return`, its own scope)
+- ❌ ES modules
 
 ### 7. Path API
 POSIX path utilities matching Node.js `path.posix` (available as global `path` or `require('path')`)
@@ -139,9 +130,11 @@ Node.js-style streams (`require('stream')`, also the global `stream`)
 - **Differences from Node.js**: strings reach `_write()` as strings and their `highWaterMark` length is counted in characters; `setEncoding()` supports `utf8`, `latin1`/`binary`, `ascii` and `hex`
 
 ### 12. Buffer
-- `Buffer.alloc(size)`, `Buffer.from(string[, encoding] | array | buffer | TypedArray | ArrayBuffer)`, `Buffer.byteLength(string[, encoding])`, `Buffer.concat(list[, totalLength])`, `Buffer.isBuffer(value)`
-- `buf.toString([encoding[, start[, end]]])`, `buf.write(string[, offset])`, `buf.slice([start][, end])`, `buf.length`
-- Encodings: `utf8`, `hex`, `base64`, `base64url`, `latin1`/`binary`, `ascii` (unknown names throw `ERR_UNKNOWN_ENCODING`)
+- ✅ A `Uint8Array` subclass: indexing, iteration, freed by the GC
+- ✅ `alloc`, `allocUnsafe`, `from`, `concat`, `compare`, `byteLength`, `isBuffer`, `isEncoding`
+- ✅ `toString`, `write`, `slice`, `subarray`, `equals`, `compare`, `copy`, `fill`, `indexOf`, `lastIndexOf`, `includes`, `toJSON`
+- ✅ `read*`/`write*` for 8 to 64-bit integers and floats, both byte orders
+- ✅ Encodings: `utf8`, `hex`, `base64`, `base64url`, `latin1`/`binary`, `ascii`
 
 ### 13. Util API
 `require('util')`, also the global `util`
@@ -235,17 +228,16 @@ clearInterval(interval);
 
 ### File System
 ```javascript
-const fs = require('fs');
+const text = fs.readFileSync('data.txt', 'utf8');
+const bytes = fs.readFileSync('logo.png');   // a Buffer
 
-// Sync
-const data = fs.readFileSync('file.txt');
-console.log(data);
-
-// Async
-fs.readFile('file.txt', (err, data) => {
-    if (err) throw err;
+fs.readFile('data.txt', 'utf8', (err, data) => {
+    if (err) return console.error(err.code);
     console.log(data);
 });
+
+const list = await fs.promises.readdir('.');
+fs.createReadStream('in').pipe(fs.createWriteStream('out'));
 ```
 
 ### HTTP Server
@@ -392,92 +384,33 @@ console.log('Home:', os.homedir());
 
 ## 🎯 Current Status
 
-### Completed ✅
-- Basic JavaScript execution
-- Console API
-- Timer API
-- File system operations (sync & async)
-- TCP server/client
-- HTTP server/client
-- Module system with caching
-- Error handling with stack traces and source excerpts
-- Process object (argv, execArgv, env, exit, cwd, pid, platform, version, versions)
-- Buffer class for binary data
-- Additional FS operations (mkdir, rmdir, stat, readdir, unlink, existsSync)
-- Path module
-- OS module
-- Events module (EventEmitter)
-- Streams (Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished)
-- Util module (inspect, format)
-- Crypto module (hashes, HMAC, PBKDF2, random values)
-- Child processes (spawn, exec, execSync, stdio streams)
-- Worker threads (message passing, SharedArrayBuffer)
-- REPL and command-line options
-- TypeScript declarations and development tooling (lint, format, type checks)
-
-### In Progress 🔨
-- None currently
-
-### Planned Features ⏳
-- `fs.createReadStream` / `fs.createWriteStream`
-- `child_process.fork()` with IPC
-- Packages (`node_modules`) and native ESM support (import/export)
+Version 1.0.0. Everything above is implemented and tested. See the [changelog](CHANGELOG.md) for what changed, the [roadmap](ROADMAP.md) for what was checked for 1.0.0, and the [API stability policy](docs/api-stability.md) for what is promised.
 
 ## 🧪 Testing
 
-Run example scripts to test features:
 ```bash
-# Console
-./build/frogjs examples/hello.js
-
-# Timers
-./build/frogjs examples/timers.js
-
-# File system
-./build/frogjs examples/fs-sync.js
-./build/frogjs examples/fs-async.js
-
-# HTTP
-./build/frogjs examples/test-http.js
-./build/frogjs examples/http-server.js
-./build/frogjs examples/http-client.js
-
-# TCP
-./build/frogjs examples/tcp-server.js
-./build/frogjs examples/tcp-client.js
-
-# Modules
-./build/frogjs examples/test-modules.js
-./build/frogjs examples/modules/main.js
-
-# Path & OS
-./build/frogjs examples/test-path.js
-./build/frogjs examples/test-os.js
-
-# Util, CLI & REPL
-./build/frogjs examples/test-util.js
-./build/frogjs examples/test-crypto.js
-./build/frogjs examples/test-child-process.js
-./build/frogjs examples/test-worker-threads.js
-./examples/test-cli.sh
-
-# Or all of them, plus lint and type checks
-make check
+make test          # 21 self-tests, the CLI test and a REPL test on a real terminal
+make test-asan     # the same under AddressSanitizer and UndefinedBehaviorSanitizer
+make leakcheck     # native leaks at exit
+make coverage      # line coverage of the C++ and the embedded JavaScript
+make fuzz          # random input for the HTTP parser and Buffer
+make check         # lint, tests, type checks and the API reference check
 ```
+
+Self-tests are `examples/test-*.js`. Where FrogJS implements a Node.js API they also run under Node.js, which is how expected values, error codes and event orders are verified.
 
 ## 📊 Performance
 
-- **Startup Time**: ~50-100ms (V8 initialization)
-- **Memory Usage**: Minimal overhead
-- **Event Loop**: Efficient libuv integration
-- **JIT Compilation**: V8 optimizations applied
+See [docs/performance.md](docs/performance.md) for `make bench` results against Node.js.
 
 ## 🔧 Build System
 
 ### Supported Platforms
-- macOS (via Homebrew)
-- Linux (manual compilation required)
-- Windows (in progress)
+- ✅ macOS on Apple Silicon: tested, released and supported
+- ⚠️ macOS on Intel, Linux: should build, not tested
+- ❌ Windows
+
+See the [support policy](docs/support-policy.md#platforms).
 
 ### Build Methods
 - **Makefile**: Direct compilation with g++
@@ -496,4 +429,4 @@ FrogJS aims for CommonJS compatibility but is not fully Node.js compatible. Focu
 ---
 
 **Last Updated**: 2026-10-31
-**Version**: 0.9.0 (Development)
+**Version**: 1.0.0

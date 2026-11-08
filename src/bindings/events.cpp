@@ -336,7 +336,6 @@ EventEmitter.on = function on(emitter, type) {
       error = err;
       emitter.removeListener(type, eventHandler);
       emitter.removeListener('error', errorHandler);
-      return Promise.reject(err);
     },
     [Symbol.asyncIterator]() { return this; },
   };

@@ -17,7 +17,7 @@ console.log('Buffer from path:', exeBuf.toString());
 console.log('\n--- Test 2: Buffer + FS ---');
 const testData = Buffer.from('Hello, v0.2.0!');
 fs.writeFileSync('test-v0.2.0.txt', testData.toString());
-const readData = fs.readFileSync('test-v0.2.0.txt');
+const readData = fs.readFileSync('test-v0.2.0.txt', 'utf8');
 console.log('Written and read:', readData);
 console.log('Data matches:', readData === 'Hello, v0.2.0!');
 
@@ -31,7 +31,7 @@ console.log('Created directory:', testDir);
 console.log('Directory exists:', fs.existsSync(testDir));
 
 const stats = fs.statSync(testDir);
-console.log('Directory isDirectory:', stats.isDirectory);
+console.log('Directory isDirectory:', stats.isDirectory());
 console.log('Directory size:', stats.size);
 
 const files = fs.readdirSync('.');
@@ -51,7 +51,7 @@ fs.stat('test-v0.2.0.txt', (err, stats) => {
         console.log('stat error:', err);
     } else {
         console.log('Async stat - size:', stats.size);
-        console.log('Async stat - isFile:', stats.isFile);
+        console.log('Async stat - isFile:', stats.isFile());
     }
     asyncTestsComplete++;
     checkAsyncComplete();
