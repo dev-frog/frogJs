@@ -1,4 +1,8 @@
-![FrogJS Logo](assets/frogjs2.png)
+<!-- ![FrogJS Logo](assets/frogjs2.png) -->
+
+<p align="center">
+  <img src="assets/frogjs-banner.png" alt="FrogJS — a lightweight JavaScript runtime built with C++17, V8 and libuv" width="100%">
+</p>
 
 [![Build](https://github.com/dev-frog/frogJs/actions/workflows/build.yml/badge.svg)](https://github.com/dev-frog/frogJs/actions/workflows/build.yml)
 [![Release](https://github.com/dev-frog/frogJs/actions/workflows/release.yml/badge.svg)](https://github.com/dev-frog/frogJs/actions/workflows/release.yml)
