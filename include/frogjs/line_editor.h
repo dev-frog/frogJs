@@ -30,8 +30,9 @@ public:
 
     void SetCompleter(Completer completer) { completer_ = std::move(completer); }
 
-    // Put the terminal in raw mode and show prompt with an empty line
-    void Start(const std::string& prompt);
+    // Put the terminal in raw mode and show prompt with an empty line (or
+    // only start editing: draw = false)
+    void Start(const std::string& prompt, bool draw = true);
     // Restore the terminal's original mode (for running code, or on exit)
     void Stop();
     bool active() const { return active_; }
@@ -42,6 +43,12 @@ public:
     // Erase the prompt line / draw it again, around output from async code
     void Hide();
     void Refresh();
+
+    // The text being edited and the cursor's byte offset into it
+    const std::string& line() const { return line_; }
+    size_t cursor() const { return cursor_; }
+    // Change the prompt of the line being edited (redrawn if active)
+    void SetPrompt(const std::string& prompt) { prompt_ = prompt; }
 
     void AddHistory(const std::string& line);
     void LoadHistory(const std::string& path);

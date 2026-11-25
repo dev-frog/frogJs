@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
+#include <tuple>
+#include <vector>
 #include <v8.h>
 
 // Helpers that compile against both older V8 (13.x) and newer V8 (15.x+).
@@ -70,6 +73,50 @@ inline size_t Utf8Length(v8::Isolate* isolate, v8::Local<S> str) {
         return str->Utf8LengthV2(isolate);
     } else {
         return str->Utf8Length(isolate);
+    }
+}
+
+// An element of a FixedArray: Get(context, i) in 13.x, Get(i) in 15.x
+template <typename F = v8::FixedArray>
+inline v8::Local<v8::Data> FixedArrayGet(v8::Local<v8::Context> context, v8::Local<F> array, int i) {
+    if constexpr (requires { array->Get(i); }) {
+        (void)context;
+        return array->Get(i);
+    } else {
+        return array->Get(context, i);
+    }
+}
+
+// A synthetic module. V8 15 takes a std::span and evaluation steps that
+// return a Promise; 13.x takes a MemorySpan and steps that return a value.
+using SyntheticStepsPromise = v8::MaybeLocal<v8::Promise> (*)(v8::Local<v8::Context>, v8::Local<v8::Module>);
+using SyntheticStepsValue = v8::MaybeLocal<v8::Value> (*)(v8::Local<v8::Context>, v8::Local<v8::Module>);
+
+template <typename M = v8::Module>
+inline v8::Local<v8::Module> CreateSyntheticModule(v8::Isolate* isolate, v8::Local<v8::String> name,
+                                                   const std::vector<v8::Local<v8::String>>& export_names,
+                                                   SyntheticStepsPromise steps_promise, SyntheticStepsValue steps_value) {
+    if constexpr (requires { M::CreateSyntheticModule(isolate, name, std::span<const v8::Local<v8::String>>(export_names), steps_promise); }) {
+        (void)steps_value;
+        return M::CreateSyntheticModule(isolate, name, std::span<const v8::Local<v8::String>>(export_names), steps_promise);
+    } else {
+        (void)steps_promise;
+        return M::CreateSyntheticModule(isolate, name,
+            v8::MemorySpan<const v8::Local<v8::String>>(export_names.data(), export_names.size()), steps_value);
+    }
+}
+
+// The message of the first top-level await that can't finish. V8 15 returns a
+// pair of vectors, 13.x a vector of (module, message) tuples.
+template <typename M = v8::Module>
+inline v8::Local<v8::Message> FirstStalledAwait(v8::Isolate* isolate, v8::Local<M> module) {
+    auto stalled = module->GetStalledTopLevelAwaitMessages(isolate);
+    if constexpr (requires { stalled.second; }) {
+        if (stalled.second.empty()) return {};
+        return stalled.second[0];
+    } else {
+        if (stalled.empty()) return {};
+        return std::get<1>(stalled[0]);
     }
 }
 

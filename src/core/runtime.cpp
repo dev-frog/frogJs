@@ -17,6 +17,7 @@
 #include "frogjs/buffer.h"
 #include "frogjs/coverage.h"
 #include "frogjs/errors.h"
+#include "frogjs/esm.h"
 #include "frogjs/loop.h"
 #include "frogjs/process.h"
 #include "frogjs/repl.h"
@@ -45,6 +46,13 @@ void SetupCrypto(Isolate* isolate, Local<Context> context);
 void SetupChildProcess(Isolate* isolate, Local<Context> context);
 void SetupWorkerThreads(Isolate* isolate, Local<Context> context);
 void SetupProcessModule(Isolate* isolate, Local<Context> context);
+void SetupQuerystring(Isolate* isolate, Local<Context> context);
+void SetupURL(Isolate* isolate, Local<Context> context);
+void SetupAssert(Isolate* isolate, Local<Context> context);
+void SetupTTY(Isolate* isolate, Local<Context> context);
+void SetupEventTarget(Isolate* isolate, Local<Context> context);
+void SetupStringDecoder(Isolate* isolate, Local<Context> context);
+void SetupReadline(Isolate* isolate, Local<Context> context);
 void SetupModules(Isolate* isolate, Local<Context> context, const std::string& mainFilePath);
 
 // Exit code for invalid command-line usage (same as Node.js)
@@ -215,6 +223,19 @@ bool ExecuteScript(Isolate* isolate, Local<Context> context, const std::string& 
 
     Local<Script> script;
     if (!Script::Compile(context, source, &origin).ToLocal(&script)) {
+        // Code with import or export is an ES module (as in Node.js)
+        if (!try_catch.HasTerminated() &&
+            frogjs::ContainsModuleSyntax(isolate, context, source, origin.ResourceName())) {
+            try_catch.Reset();
+            if (check_only) {
+                ScriptOrigin module_origin(origin.ResourceName(), 0, 0, false, -1, Local<Value>(), false, false, true);
+                ScriptCompiler::Source module_source(source, module_origin);
+                if (!ScriptCompiler::CompileModule(isolate, &module_source).IsEmpty()) return true;
+                frogjs::ReportException(isolate, &try_catch);
+                return false;
+            }
+            return frogjs::RunMainSource(isolate, context, code, filename == "[eval]" ? "[eval1]" : filename);
+        }
         if (check_only) {
             frogjs::ReportException(isolate, &try_catch);
             return false;
@@ -333,6 +354,7 @@ Local<Context> CreateContext(Isolate* isolate, const std::vector<std::string>& a
     SetupBuffer(isolate, context);
     SetupTimers(isolate, context);
     SetupEvents(isolate, context);
+    SetupEventTarget(isolate, context);
     SetupStream(isolate, context);
     SetupFileSystem(isolate, context);
     SetupNet(isolate, context);
@@ -343,6 +365,12 @@ Local<Context> CreateContext(Isolate* isolate, const std::vector<std::string>& a
     SetupChildProcess(isolate, context);
     SetupWorkerThreads(isolate, context);
     SetupProcessModule(isolate, context);
+    SetupQuerystring(isolate, context);
+    SetupStringDecoder(isolate, context);
+    SetupURL(isolate, context);
+    SetupAssert(isolate, context);
+    SetupTTY(isolate, context);
+    SetupReadline(isolate, context);
     SetupModules(isolate, context, main_filename);
 
     return handle_scope.Escape(context);
@@ -481,6 +509,8 @@ int main(int argc, char* argv[]) {
                 if (try_catch.HasCaught()) frogjs::HandleUncaught(isolate, &try_catch);
                 frogjs::DrainTasks(isolate);
             } while (uv_loop_alive(uv_default_loop()));
+            // The main ES module still waits on a top-level await that can't finish
+            if (frogjs::ReportStalledMainModule(isolate)) exit_code = 13;
         }
         if (ok) exit_code = frogjs::FinishProcess(isolate, context, exit_code);
         frogjs::WriteCoverage(isolate);

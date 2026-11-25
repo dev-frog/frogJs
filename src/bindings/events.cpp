@@ -271,47 +271,179 @@ EventEmitter.listenerCount = function listenerCount(emitter, type) {
     : EventEmitter.prototype.listenerCount.call(emitter, type);
 };
 
+const isEventTarget = (value) => value !== null && typeof value === 'object' && typeof value.addEventListener === 'function' &&
+  typeof value.dispatchEvent === 'function';
+const kEventTargetListeners = (target) => Object.getOwnPropertySymbols(target).find((symbol) => symbol.description === 'listeners');
+const kEventTargetMax = (target) => Object.getOwnPropertySymbols(target).find((symbol) => symbol.description === 'maxListeners');
+
+// Node.js's AbortError: what a function rejects with when its signal aborts
+class AbortError extends Error {
+  constructor(message = 'The operation was aborted', options = undefined) {
+    super(message, options);
+    this.code = 'ABORT_ERR';
+    this.name = 'AbortError';
+  }
+}
+
+function validateAbortSignal(signal, name) {
+  if (signal !== undefined && (signal === null || typeof signal !== 'object' || !('aborted' in signal))) {
+    throw makeError(TypeError, 'ERR_INVALID_ARG_TYPE', `The "${name}" property must be an instance of AbortSignal. Received ${describe(signal)}`);
+  }
+}
+
+function validateOptions(options) {
+  if (options !== undefined && (options === null || typeof options !== 'object')) {
+    throw makeError(TypeError, 'ERR_INVALID_ARG_TYPE', `The "options" argument must be of type object. Received ${describe(options)}`);
+  }
+  return options || {};
+}
+
 EventEmitter.getEventListeners = function getEventListeners(emitter, type) {
+  if (isEventTarget(emitter) && typeof emitter.listeners !== 'function') {
+    const key = kEventTargetListeners(emitter);
+    const list = key ? emitter[key].get(String(type)) : undefined;
+    return list ? list.map((entry) => entry.listener) : [];
+  }
   return emitter.listeners(type);
 };
 
-// events.once(emitter, name): a Promise of the next event's arguments.
-// Rejects if 'error' is emitted first (unless waiting for 'error' itself).
-EventEmitter.once = function once(emitter, type) {
+// events.setMaxListeners(n, ...targets): for these emitters and targets, or
+// the default for new ones
+EventEmitter.setMaxListeners = function setMaxListeners(n = defaultMaxListeners, ...targets) {
+  checkMaxListeners(n, 'n');
+  if (targets.length === 0) {
+    defaultMaxListeners = n;
+    return;
+  }
+  for (const target of targets) {
+    if (isEventTarget(target) && typeof target.setMaxListeners !== 'function') {
+      const key = kEventTargetMax(target);
+      if (key) target[key] = { limit: n, warned: false };
+    } else if (target && typeof target.setMaxListeners === 'function') {
+      target.setMaxListeners(n);
+    } else {
+      throw makeError(TypeError, 'ERR_INVALID_ARG_TYPE', `The "eventTargets" argument must be an instance of EventEmitter or EventTarget. Received ${describe(target)}`);
+    }
+  }
+};
+
+EventEmitter.getMaxListeners = function getMaxListeners(emitterOrTarget) {
+  if (emitterOrTarget && typeof emitterOrTarget.getMaxListeners === 'function') return emitterOrTarget.getMaxListeners();
+  if (isEventTarget(emitterOrTarget)) {
+    const key = kEventTargetMax(emitterOrTarget);
+    return key ? emitterOrTarget[key].limit : defaultMaxListeners;
+  }
+  throw makeError(TypeError, 'ERR_INVALID_ARG_TYPE', `The "emitter" argument must be an instance of EventEmitter or EventTarget. Received ${describe(emitterOrTarget)}`);
+};
+
+// events.addAbortListener(signal, listener): listen for the abort, and get a
+// disposable that stops listening
+EventEmitter.addAbortListener = function addAbortListener(signal, listener) {
+  if (signal === undefined) throw makeError(TypeError, 'ERR_INVALID_ARG_TYPE', 'The "signal" argument must be an instance of AbortSignal. Received undefined');
+  validateAbortSignal(signal, 'signal');
+  if (typeof listener !== 'function') {
+    throw makeError(TypeError, 'ERR_INVALID_ARG_TYPE', `The "listener" argument must be of type function. Received ${describe(listener)}`);
+  }
+  let removed = false;
+  if (signal.aborted) {
+    queueMicrotask(() => listener());
+  } else {
+    signal.addEventListener('abort', listener, { once: true });
+  }
+  const dispose = () => {
+    if (removed) return;
+    removed = true;
+    signal.removeEventListener('abort', listener);
+  };
+  return { [Symbol.dispose || Symbol.for('nodejs.dispose')]: dispose };
+};
+
+// events.once(emitter, name[, { signal }]): a Promise of the next event's
+// arguments ([event] for an EventTarget). Rejects if 'error' is emitted
+// first (unless waiting for 'error' itself), or when the signal aborts.
+EventEmitter.once = function once(emitter, type, options = undefined) {
+  const { signal } = validateOptions(options);
+  validateAbortSignal(signal, 'options.signal');
+  if (signal && signal.aborted) return Promise.reject(new AbortError(undefined, { cause: signal.reason }));
   return new Promise((resolve, reject) => {
-    const errorListener = (err) => {
-      emitter.removeListener(type, resolver);
-      reject(err);
+    let onAbort;
+    const cleanupSignal = () => {
+      if (signal) signal.removeEventListener('abort', onAbort);
     };
-    const resolver = (...args) => {
-      if (type !== 'error') emitter.removeListener('error', errorListener);
-      resolve(args);
-    };
-    emitter.once(type, resolver);
-    if (type !== 'error') emitter.once('error', errorListener);
+    if (isEventTarget(emitter) && typeof emitter.once !== 'function') {
+      const listener = (event) => {
+        cleanupSignal();
+        resolve([event]);
+      };
+      emitter.addEventListener(type, listener, { once: true });
+      onAbort = () => {
+        emitter.removeEventListener(type, listener);
+        reject(new AbortError(undefined, { cause: signal.reason }));
+      };
+    } else {
+      const errorListener = (err) => {
+        emitter.removeListener(type, resolver);
+        cleanupSignal();
+        reject(err);
+      };
+      const resolver = (...args) => {
+        if (type !== 'error') emitter.removeListener('error', errorListener);
+        cleanupSignal();
+        resolve(args);
+      };
+      emitter.once(type, resolver);
+      if (type !== 'error') emitter.once('error', errorListener);
+      onAbort = () => {
+        emitter.removeListener(type, resolver);
+        emitter.removeListener('error', errorListener);
+        reject(new AbortError(undefined, { cause: signal.reason }));
+      };
+    }
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
   });
 };
 
-// events.on(emitter, name): an async iterator of each event's arguments.
-// An 'error' event makes the next iteration throw.
-EventEmitter.on = function on(emitter, type) {
+// events.on(emitter, name[, { signal, close }]): an async iterator of each
+// event's arguments. An 'error' event makes the next iteration throw; so does
+// the signal aborting. An event named in `close` ends the iteration.
+EventEmitter.on = function on(emitter, type, options = undefined) {
+  const { signal, close = [] } = validateOptions(options);
+  validateAbortSignal(signal, 'options.signal');
+  if (signal && signal.aborted) throw new AbortError(undefined, { cause: signal.reason });
   const unconsumed = [];
   const pending = [];
   let error = null;
   let finished = false;
+  const target = isEventTarget(emitter) && typeof emitter.on !== 'function';
+  const listen = (name, handler) => (target ? emitter.addEventListener(name, handler) : emitter.on(name, handler));
+  const unlisten = (name, handler) => (target ? emitter.removeEventListener(name, handler) : emitter.removeListener(name, handler));
 
   const eventHandler = (...args) => {
     const next = pending.shift();
     if (next) next.resolve({ value: args, done: false });
     else unconsumed.push(args);
   };
-  const errorHandler = (err) => {
+  const fail = (err) => {
     finished = true;
     const next = pending.shift();
     if (next) next.reject(err);
     else error = err;
     iterator.return();
   };
+  const errorHandler = (err) => fail(err);
+  const closeHandler = () => {
+    cleanup();
+    finished = true;
+    for (const p of pending.splice(0)) p.resolve({ value: undefined, done: true });
+  };
+  const onAbort = () => fail(new AbortError(undefined, { cause: signal.reason }));
+
+  function cleanup() {
+    unlisten(type, eventHandler);
+    if (!target) unlisten('error', errorHandler);
+    for (const name of close) unlisten(name, closeHandler);
+    if (signal) signal.removeEventListener('abort', onAbort);
+  }
 
   const iterator = {
     next() {
@@ -326,22 +458,22 @@ EventEmitter.on = function on(emitter, type) {
       return new Promise((resolve, reject) => pending.push({ resolve, reject }));
     },
     return() {
-      emitter.removeListener(type, eventHandler);
-      emitter.removeListener('error', errorHandler);
+      cleanup();
       finished = true;
       for (const p of pending.splice(0)) p.resolve({ value: undefined, done: true });
       return Promise.resolve({ value: undefined, done: true });
     },
     throw(err) {
       error = err;
-      emitter.removeListener(type, eventHandler);
-      emitter.removeListener('error', errorHandler);
+      cleanup();
     },
     [Symbol.asyncIterator]() { return this; },
   };
 
-  emitter.on(type, eventHandler);
-  if (type !== 'error') emitter.on('error', errorHandler);
+  listen(type, eventHandler);
+  if (type !== 'error' && !target) listen('error', errorHandler);
+  for (const name of close) listen(name, closeHandler);
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
   return iterator;
 };
 

@@ -68,6 +68,14 @@ SRCS = $(SRC_DIR)/core/runtime.cpp \
        $(SRC_DIR)/bindings/crypto.cpp \
        $(SRC_DIR)/bindings/child_process.cpp \
        $(SRC_DIR)/bindings/worker_threads.cpp \
+       $(SRC_DIR)/bindings/querystring.cpp \
+       $(SRC_DIR)/bindings/url.cpp \
+       $(SRC_DIR)/bindings/esm.cpp \
+       $(SRC_DIR)/bindings/assert.cpp \
+       $(SRC_DIR)/bindings/tty.cpp \
+       $(SRC_DIR)/bindings/event_target.cpp \
+       $(SRC_DIR)/bindings/string_decoder.cpp \
+       $(SRC_DIR)/bindings/readline.cpp \
        $(SRC_DIR)/utils/js_module.cpp \
        $(SRC_DIR)/utils/errors.cpp \
        $(SRC_DIR)/utils/encoding.cpp \
@@ -119,7 +127,7 @@ run: $(TARGET)
 # test file) turns a hang into a failure.
 TESTS = hello test-buffer test-path test-os test-modules test-events test-streams test-util test-http \
         test-crypto test-child-process test-worker-threads test-fs test-net test-process test-timers \
-        test-module-loading test-errors test-http-limits test-edges test-memory
+        test-module-loading test-errors test-http-limits test-edges test-memory test-url test-esm test-assert test-abort test-tty test-util-extras test-readline
 TEST_TIMEOUT ?= 180
 WITH_TIMEOUT = perl -e 'alarm shift; exec @ARGV' $(TEST_TIMEOUT)
 

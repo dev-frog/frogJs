@@ -350,8 +350,9 @@ class ChildProcess extends EventEmitter {
 function spawn(file, args, options) {
   const opts = normalizeSpawnArguments(file, args, options);
   validateTimeout(opts.timeout);
+  validateAbortSignal(opts.signal);
   const killSignal = opts.killSignal === undefined ? 'SIGTERM' : opts.killSignal;
-  if (opts.timeout > 0) convertSignal(killSignal);
+  if (opts.timeout > 0 || opts.signal !== undefined) convertSignal(killSignal);
 
   const child = new ChildProcess();
   child.spawn(opts);
@@ -363,7 +364,40 @@ function spawn(file, args, options) {
     }, opts.timeout);
     child.once('exit', () => { if (timer) clearTimeout(timer); });
   }
+
+  // options.signal: aborting kills the child, which then emits an AbortError
+  const signal = opts.signal;
+  if (signal !== undefined) {
+    const onAbort = () => {
+      try {
+        if (child.kill(killSignal)) child.emit('error', new AbortError(undefined, { cause: signal.reason }));
+      } catch (err) {
+        child.emit('error', err);
+      }
+    };
+    if (signal.aborted) {
+      process.nextTick(onAbort);
+    } else {
+      signal.addEventListener('abort', onAbort, { once: true });
+      child.once('exit', () => signal.removeEventListener('abort', onAbort));
+    }
+  }
   return child;
+}
+
+// Node.js's AbortError, for a child whose signal aborted
+class AbortError extends Error {
+  constructor(message = 'The operation was aborted', options = undefined) {
+    super(message, options);
+    this.code = 'ABORT_ERR';
+    this.name = 'AbortError';
+  }
+}
+
+function validateAbortSignal(signal) {
+  if (signal !== undefined && (signal === null || typeof signal !== 'object' || !('aborted' in signal))) {
+    throw invalidArgType('options.signal', 'an instance of AbortSignal', signal);
+  }
 }
 
 // exec(command[, options][, callback])
@@ -418,6 +452,8 @@ function execFile(file, args, options, callback) {
   const child = spawn(file, args, {
     cwd: options.cwd,
     env: options.env,
+    signal: options.signal,
+    killSignal: options.killSignal,
     shell: options.shell,
     argv0: options.argv0,
     uid: options.uid,

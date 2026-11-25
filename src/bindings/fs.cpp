@@ -168,10 +168,49 @@ function readFileSync(path, options) {
   return decode(native.readFile(target, toFlags(flag)), encoding);
 }
 
+// Node.js's AbortError, for an operation whose signal aborted
+class AbortError extends Error {
+  constructor(message = 'The operation was aborted', options = undefined) {
+    super(message, options);
+    this.code = 'ABORT_ERR';
+    this.name = 'AbortError';
+  }
+}
+
+// options.signal: the callback gets an AbortError when the signal aborts
+// (the operation's own result is then ignored). Returns the callback to use,
+// or null if the signal had already aborted.
+function abortable(options, callback) {
+  const signal = options !== null && typeof options === 'object' ? options.signal : undefined;
+  if (signal === undefined) return callback;
+  if (signal === null || typeof signal !== 'object' || !('aborted' in signal)) {
+    throw invalidType('options.signal', 'an instance of AbortSignal', signal);
+  }
+  if (signal.aborted) {
+    process.nextTick(callback, new AbortError(undefined, { cause: signal.reason }));
+    return null;
+  }
+  let done = false;
+  const onAbort = () => {
+    if (done) return;
+    done = true;
+    callback(new AbortError(undefined, { cause: signal.reason }));
+  };
+  signal.addEventListener('abort', onAbort, { once: true });
+  return (...args) => {
+    signal.removeEventListener('abort', onAbort);
+    if (done) return;
+    done = true;
+    callback(...args);
+  };
+}
+
 function readFile(path, options, callback) {
   callback = checkCallback(typeof options === 'function' ? options : callback);
   const { encoding, flag } = getOptions(options, { encoding: null, flag: 'r' });
   const target = typeof path === 'number' ? checkFd(path) : toPath(path);
+  callback = abortable(options, callback);
+  if (callback === null) return;
   native.readFile(target, toFlags(flag), (err, buffer) => {
     if (err) return callback(err);
     let result;
@@ -196,6 +235,8 @@ function writeFileSync(path, data, options) {
 function writeFile(path, data, options, callback) {
   callback = checkCallback(typeof options === 'function' ? options : callback);
   const { encoding, flag, mode } = getOptions(options, { encoding: 'utf8', flag: 'w', mode: 0o666 });
+  callback = abortable(options, callback);
+  if (callback === null) return;
   native.writeFile(writeTarget(path), toData(data, encoding), toFlags(flag), toMode(mode, 0o666), (err) => callback(err));
 }
 

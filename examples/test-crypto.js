@@ -164,6 +164,32 @@ async function run() {
     check('randomUUID is a version 4 UUID', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(uuid), true);
     check('randomUUIDs differ', crypto.randomUUID() !== crypto.randomUUID(), true);
 
+    const checkThrows = (name, fn, code) => {
+        let caught = null;
+        try { fn(); } catch (err) { caught = err; }
+        check(name, caught && caught.code, code);
+    };
+
+    // randomFillSync / randomFill: offset and size count elements of a typed array
+    const filled = crypto.randomFillSync(Buffer.alloc(64), 8, 16);
+    check('randomFillSync keeps bytes outside offset and size', filled.subarray(0, 8).every((b) => b === 0) && filled.subarray(24).every((b) => b === 0), true);
+    check('randomFillSync fills the range', filled.subarray(8, 24).some((b) => b !== 0), true);
+    const words = crypto.randomFillSync(new Uint32Array(8), 2, 2);
+    check('randomFillSync counts elements', words[0] === 0 && words[1] === 0 && words[4] === 0 && (words[2] !== 0 || words[3] !== 0), true);
+    check('randomFillSync of an ArrayBuffer', crypto.randomFillSync(new ArrayBuffer(4)).byteLength, 4);
+    checkThrows('randomFillSync size out of range', () => crypto.randomFillSync(Buffer.alloc(4), 2, 3), 'ERR_OUT_OF_RANGE');
+    checkThrows('randomFillSync of a string', () => crypto.randomFillSync('abc'), 'ERR_INVALID_ARG_TYPE');
+    const asyncFilled = await new Promise((resolve, reject) => crypto.randomFill(new Uint8Array(32), (err, buf) => (err ? reject(err) : resolve(buf))));
+    check('randomFill', asyncFilled.length === 32 && asyncFilled.some((b) => b !== 0), true);
+    const partialFill = await new Promise((resolve) => crypto.randomFill(Buffer.alloc(8), 4, (err, buf) => resolve(buf)));
+    check('randomFill with an offset', partialFill.subarray(0, 4).every((b) => b === 0), true);
+
+    // webcrypto: random values, called on the Crypto object
+    check('webcrypto.getRandomValues', crypto.webcrypto.getRandomValues(new Uint8Array(4)).length, 4);
+    check('webcrypto.randomUUID', crypto.webcrypto.randomUUID().length, 36);
+    check('webcrypto toStringTag', Object.prototype.toString.call(crypto.webcrypto), '[object Crypto]');
+    checkThrows('webcrypto methods need their object', () => crypto.webcrypto.getRandomValues.call({}, new Uint8Array(1)), 'ERR_INVALID_THIS');
+
     const values = crypto.getRandomValues(new Uint32Array(8));
     check('getRandomValues fills in place', values instanceof Uint32Array && values.some((v) => v !== 0), true);
     check('getRandomValues rejects float arrays', thrown(() => crypto.getRandomValues(new Float32Array(2))),

@@ -29,6 +29,7 @@ namespace {
 const char* kHelpText =
     ".break    Sometimes you get stuck, this gets you out\n"
     ".clear    Break, and also clear the local context\n"
+    ".editor   Enter editor mode\n"
     ".exit     Exit the REPL\n"
     ".help     Print this help message\n"
     ".load     Load JS from a file into the REPL session\n"
@@ -36,7 +37,7 @@ const char* kHelpText =
     "\n"
     "Press Ctrl+C to abort current expression, Ctrl+D to exit the REPL\n";
 
-const char* kCommands[] = {".break", ".clear", ".exit", ".help", ".load", ".save"};
+const char* kCommands[] = {".break", ".clear", ".editor", ".exit", ".help", ".load", ".save"};
 
 const char* kKeywords[] = {
     "async", "await", "break", "case", "catch", "class", "const", "continue", "debugger",
@@ -45,6 +46,280 @@ const char* kKeywords[] = {
     "static", "super", "switch", "this", "throw", "true", "try", "typeof", "undefined",
     "var", "void", "while", "with", "yield",
 };
+
+// Top-level await at the prompt: input that only compiles with await becomes
+// an async function. Its declarations become globals (var), the last
+// expression is returned as { value }, and the REPL shows it when it settles.
+// It tokenizes just enough JavaScript to find statements and bindings.
+const char* kTopLevelAwaitSource = R"JS(
+(function (src) {
+'use strict';
+  // ---- Tokens: just enough of JavaScript to find statements and bindings ----
+  const puncts = ['>>>=', '...', '===', '!==', '**=', '<<=', '>>=', '>>>', '&&=', '||=', '??=', '=>', '==', '!=', '<=', '>=',
+    '&&', '||', '??', '?.', '++', '--', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '**', '<<', '>>'];
+  const regexAfterName = /^(?:return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)$/;
+  const tokens = [];
+  let i = 0;
+  let newline = false;
+  const fail = () => { throw new SyntaxError('cannot rewrite'); };
+
+  function skipTemplate() {
+    // i is after the opening backtick
+    while (i < src.length) {
+      const c = src[i];
+      if (c === '\\') { i += 2; continue; }
+      if (c === '`') { i++; return; }
+      if (c === '$' && src[i + 1] === '{') {
+        i += 2;
+        let depth = 1;
+        while (i < src.length && depth > 0) {
+          const d = src[i];
+          if (d === '{') depth++;
+          else if (d === '}') depth--;
+          else if (d === '"' || d === "'") { skipString(d); continue; }
+          else if (d === '`') { i++; skipTemplate(); continue; }
+          i++;
+        }
+        continue;
+      }
+      i++;
+    }
+    fail();
+  }
+  function skipString(quote) {
+    i++;
+    while (i < src.length && src[i] !== quote) {
+      if (src[i] === '\\') i++;
+      else if (src[i] === '\n') fail();
+      i++;
+    }
+    if (i >= src.length) fail();
+    i++;
+  }
+  function regexAllowed() {
+    const prev = tokens[tokens.length - 1];
+    if (!prev) return true;
+    if (prev.type === 'punct') return !/^[)\]}]$/.test(prev.value) && prev.value !== '++' && prev.value !== '--';
+    if (prev.type === 'name') return regexAfterName.test(prev.value);
+    return false;
+  }
+
+  while (i < src.length) {
+    const c = src[i];
+    if (c === '\n') { newline = true; i++; continue; }
+    if (/\s/.test(c)) { i++; continue; }
+    if (src.startsWith('//', i)) { const end = src.indexOf('\n', i); i = end < 0 ? src.length : end; continue; }
+    if (src.startsWith('/*', i)) {
+      const end = src.indexOf('*/', i + 2);
+      if (end < 0) fail();
+      if (src.slice(i, end).includes('\n')) newline = true;
+      i = end + 2;
+      continue;
+    }
+    const start = i;
+    let type;
+    if (c === '"' || c === "'") { skipString(c); type = 'string'; }
+    else if (c === '`') { i++; skipTemplate(); type = 'template'; }
+    else if (/[A-Za-z_$\u0080-￿]/.test(c)) { while (i < src.length && /[\w$\u0080-￿]/.test(src[i])) i++; type = 'name'; }
+    else if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(src[i + 1]))) { while (i < src.length && /[\w.]/.test(src[i])) i++; type = 'number'; }
+    else if (c === '/' && regexAllowed()) {
+      i++;
+      let inClass = false;
+      while (i < src.length && (src[i] !== '/' || inClass)) {
+        if (src[i] === '\\') i++;
+        else if (src[i] === '[') inClass = true;
+        else if (src[i] === ']') inClass = false;
+        else if (src[i] === '\n') fail();
+        i++;
+      }
+      i++;
+      while (i < src.length && /\w/.test(src[i])) i++;
+      type = 'regex';
+    } else {
+      const p = puncts.find((candidate) => src.startsWith(candidate, i));
+      i += p ? p.length : 1;
+      type = 'punct';
+    }
+    tokens.push({ type, value: src.slice(start, i), start, end: i, newline });
+    newline = false;
+  }
+
+  const is = (t, value) => t && t.type !== 'string' && t.type !== 'template' && t.value === value;
+
+  // ---- Statements: [first token, last token] at the top level ----
+  const blockStatements = new Set(['if', 'for', 'while', 'try', 'switch', 'function', 'class', 'with']);
+  const continuesAfterBlock = new Set(['else', 'catch', 'finally']);
+  // A newline ends a statement unless one side can't end or start one
+  function continues(prev, next) {
+    if (prev.type === 'punct' && !/^(?:\)|\]|\}|\+\+|--)$/.test(prev.value)) return true;
+    if (prev.type === 'name' && /^(?:typeof|instanceof|in|of|new|delete|void|await|yield|extends|async)$/.test(prev.value)) return true;
+    if (next.type === 'punct' && !/^(?:\{|!|~|\+\+|--|\+|-)$/.test(next.value)) return true;
+    if (next.type === 'name' && /^(?:in|of|instanceof)$/.test(next.value)) return true;
+    if (next.type === 'template') return true;
+    return false;
+  }
+  const statements = [];
+  let first = 0;
+  let depth = 0;
+  for (let k = 0; k < tokens.length; k++) {
+    const t = tokens[k];
+    if (k > first && depth === 0 && t.newline && !continues(tokens[k - 1], t)) {
+      statements.push([first, k - 1]);
+      first = k;
+    }
+    if (t.type === 'punct' && (t.value === '(' || t.value === '[' || t.value === '{' || t.value === '${')) depth++;
+    else if (t.type === 'punct' && (t.value === ')' || t.value === ']' || t.value === '}')) {
+      depth--;
+      if (depth < 0) fail();
+      const head = tokens[first];
+      const block = blockStatements.has(head.value) || (is(head, 'async') && is(tokens[first + 1], 'function')) || is(head, '{');
+      if (depth === 0 && t.value === '}' && block && !continuesAfterBlock.has((tokens[k + 1] || {}).value) &&
+          !(is(head, 'do'))) {
+        statements.push([first, k]);
+        first = k + 1;
+      }
+    } else if (depth === 0 && is(t, ';')) {
+      statements.push([first, k]);
+      first = k + 1;
+    }
+  }
+  if (first < tokens.length) statements.push([first, tokens.length - 1]);
+
+  // ---- Binding names in a declaration pattern ----
+  function patternNames(from, to, names) {
+    let k = from;
+    function skipDefault() {
+      if (!is(tokens[k], '=')) return;
+      let level = 0;
+      for (k++; k <= to; k++) {
+        const v = tokens[k].type === 'punct' ? tokens[k].value : '';
+        if (v === '(' || v === '[' || v === '{') level++;
+        else if (v === ')' || v === ']' || v === '}') { if (level === 0) return; level--; }
+        else if (v === ',' && level === 0) return;
+      }
+    }
+    function binding() {
+      const t = tokens[k];
+      if (!t) fail();
+      if (t.type === 'name') { names.push(t.value); k++; }
+      else if (is(t, '{')) objectPattern();
+      else if (is(t, '[')) arrayPattern();
+      else fail();
+      skipDefault();
+    }
+    function objectPattern() {
+      k++;
+      while (k <= to && !is(tokens[k], '}')) {
+        if (is(tokens[k], '...')) { k++; binding(); }
+        else {
+          let shorthand = null;
+          if (is(tokens[k], '[')) {
+            let level = 0;
+            for (; k <= to; k++) {
+              if (is(tokens[k], '[')) level++;
+              else if (is(tokens[k], ']') && --level === 0) break;
+            }
+            k++;
+          } else {
+            shorthand = tokens[k].type === 'name' ? tokens[k].value : null;
+            k++;
+          }
+          if (is(tokens[k], ':')) { k++; binding(); }
+          else if (shorthand) { names.push(shorthand); skipDefault(); }
+          else fail();
+        }
+        if (is(tokens[k], ',')) k++;
+      }
+      k++;
+    }
+    function arrayPattern() {
+      k++;
+      while (k <= to && !is(tokens[k], ']')) {
+        if (is(tokens[k], ',')) { k++; continue; }
+        if (is(tokens[k], '...')) k++;
+        binding();
+        if (is(tokens[k], ',')) k++;
+      }
+      k++;
+    }
+    binding();
+    return k;
+  }
+
+  // ---- The rewrite ----
+  const hoisted = [];
+  const body = [];
+  const notExpressions = new Set(['var', 'let', 'const', 'function', 'class', 'if', 'for', 'while', 'do', 'try', 'switch',
+    'return', 'throw', 'break', 'continue', 'import', 'export', 'with', 'debugger']);
+  statements.forEach(([from, to], index) => {
+    const head = tokens[from];
+    let end = to;
+    if (is(tokens[end], ';')) end--;
+    const text = end >= from ? src.slice(head.start, tokens[end].end) : '';
+    const last = index === statements.length - 1;
+    if ((is(head, 'var') || is(head, 'let') || is(head, 'const')) && tokens[from + 1] && !is(tokens[from + 1], '(') &&
+        !is(tokens[from + 1], '=')) {
+      // const a = 1, { b } = c  ->  void (a = 1, { b } = c)
+      const assignments = [];
+      let k = from + 1;
+      while (k <= end) {
+        // The pattern: a name, or a bracketed destructuring pattern
+        const patternStart = k;
+        if (is(tokens[k], '{') || is(tokens[k], '[')) {
+          let level = 0;
+          for (; k <= end; k++) {
+            if (is(tokens[k], '{') || is(tokens[k], '[')) level++;
+            else if ((is(tokens[k], '}') || is(tokens[k], ']')) && --level === 0) break;
+          }
+        } else if (!tokens[k] || tokens[k].type !== 'name') {
+          fail();
+        }
+        const patternEnd = k;
+        const names = [];
+        patternNames(patternStart, patternEnd, names);
+        hoisted.push(...names);
+        k++;
+        // The initializer, up to a comma at this level
+        if (is(tokens[k], '=')) {
+          let level = 0;
+          let initEnd = k;
+          for (k++; k <= end; k++) {
+            const v = tokens[k].type === 'punct' ? tokens[k].value : '';
+            if (v === '(' || v === '[' || v === '{') level++;
+            else if (v === ')' || v === ']' || v === '}') level--;
+            else if (v === ',' && level === 0) break;
+            initEnd = k;
+          }
+          assignments.push(src.slice(tokens[patternStart].start, tokens[initEnd].end));
+        }
+        if (is(tokens[k], ',')) k++;
+      }
+      if (assignments.length > 0) body.push(`void (${assignments.join(', ')});`);
+      if (last) body.push('return { value: undefined };');
+      return;
+    }
+    if (is(head, 'function') || (is(head, 'async') && is(tokens[from + 1], 'function') && !tokens[from + 1].newline) || is(head, 'class')) {
+      let k = from + 1;
+      if (is(tokens[k], 'function')) k++;
+      if (is(tokens[k], '*')) k++;
+      if (tokens[k] && tokens[k].type === 'name' && !is(tokens[k], 'extends')) {
+        hoisted.push(tokens[k].value);
+        body.push(`${tokens[k].value} = ${text};`);
+        if (last) body.push('return { value: undefined };');
+        return;
+      }
+    }
+    if (last && !notExpressions.has(head.value) && !is(head, '{') && !(is(head, 'async') && is(tokens[from + 1], 'function'))) {
+      body.push(`return { value: (${text}) };`);
+      return;
+    }
+    body.push(src.slice(head.start, tokens[to].end));
+  });
+  if (!body.some((line) => line.startsWith('return { value:'))) body.push('return { value: undefined };');
+  const declarations = [...new Set(hoisted)].map((name) => `var ${name};`).join(' ');
+  return `${declarations} (async () => { ${body.join('\n')} })()`;
+})
+)JS";
 
 // Lists every identifier-like property name of a value and its prototypes
 const char* kCompleterSource = R"JS(
@@ -72,6 +347,12 @@ struct ReplState {
     std::string history_path;
     std::string pending_input;  // non-terminal mode: bytes not yet split into lines
     bool exit_warned = false;   // Ctrl+C was pressed once on an empty line
+    bool awaiting = false;      // waiting for a top-level await; input waits too
+    int await_id = 0;           // which await a settled promise belongs to
+    std::string typeahead;      // terminal bytes typed while awaiting
+    bool eof_pending = false;   // non-terminal input ended while awaiting
+    bool editor_mode = false;   // .editor: lines are collected until Ctrl+D
+    std::string editor_buffer;
     int counter = 0;            // names scripts REPL1, REPL2, ...
 
     uv_poll_t stdin_poll;
@@ -221,6 +502,96 @@ MaybeLocal<Script> CompileInput(Local<Context> context, const std::string& code,
     return Script::Compile(context, source, &origin);
 }
 
+void ResumeInput();
+
+// "await" where a script can't have it: worth rewriting as an async function
+bool NeedsAsyncWrap(TryCatch& try_catch) {
+    std::string error = ToStdString(g_repl->isolate, try_catch.Exception());
+    return error.find("await is only valid in async functions and the top level bodies of modules") != std::string::npos ||
+           error.find("Unexpected reserved word") != std::string::npos;
+}
+
+void PrintUncaughtValue(Local<Context> context, Local<Value> exception) {
+    Isolate* isolate = g_repl->isolate;
+    context->Global()->Set(context, String::NewFromUtf8Literal(isolate, "_error"), exception).Check();
+    PrintResult("Uncaught " + StripReplFrames(frogjs::Inspect(isolate, context, exception, g_repl->colors)));
+}
+
+// A settled top-level await: show its value or error, then take input again.
+// The data is the await's id: one interrupted by Ctrl+C is ignored.
+void OnAwaitSettled(const FunctionCallbackInfo<Value>& args, bool fulfilled) {
+    Isolate* isolate = args.GetIsolate();
+    Local<Context> context = isolate->GetCurrentContext();
+    if (g_repl == nullptr || !g_repl->awaiting || args.Data()->Int32Value(context).FromMaybe(-1) != g_repl->await_id) return;
+    g_repl->awaiting = false;
+    if (fulfilled) {
+        Local<Value> value = Undefined(isolate);
+        if (args[0]->IsObject()) {
+            TryCatch try_catch(isolate);
+            if (!args[0].As<Object>()->Get(context, String::NewFromUtf8Literal(isolate, "value")).ToLocal(&value)) value = Undefined(isolate);
+        }
+        context->Global()->Set(context, String::NewFromUtf8Literal(isolate, "_"), value).Check();
+        PrintResult(frogjs::Inspect(isolate, context, value, g_repl->colors));
+    } else {
+        PrintUncaughtValue(context, args[0]);
+    }
+    ResumeInput();
+}
+
+void OnAwaitFulfilled(const FunctionCallbackInfo<Value>& args) { OnAwaitSettled(args, true); }
+void OnAwaitRejected(const FunctionCallbackInfo<Value>& args) { OnAwaitSettled(args, false); }
+
+// Run input with top-level await. Returns false if it can't be rewritten (the
+// original error is then shown).
+bool EvaluateAsync(Local<Context> context, const std::string& code, const std::string& name) {
+    Isolate* isolate = g_repl->isolate;
+    std::string rewritten;
+    {
+        TryCatch try_catch(isolate);
+        Local<Script> transform_script;
+        Local<Value> transform;
+        Local<Value> result;
+        Local<Value> argv[1] = {String::NewFromUtf8(isolate, code.data(), NewStringType::kNormal, static_cast<int>(code.size())).ToLocalChecked()};
+        if (!CompileInput(context, kTopLevelAwaitSource, "[await]").ToLocal(&transform_script) ||
+            !transform_script->Run(context).ToLocal(&transform) || !transform->IsFunction() ||
+            !transform.As<Function>()->Call(context, Undefined(isolate), 1, argv).ToLocal(&result) || !result->IsString()) {
+            return false;
+        }
+        rewritten = ToStdString(isolate, result);
+    }
+    TryCatch try_catch(isolate);
+    Local<Script> script;
+    if (!CompileInput(context, rewritten, name).ToLocal(&script)) return false;
+    RecordDeclarations(code);
+    {
+        std::lock_guard<std::mutex> lock(g_repl->eval_mutex);
+        g_repl->evaluating = true;
+    }
+    Local<Value> result;
+    bool ok = script->Run(context).ToLocal(&result);
+    {
+        std::lock_guard<std::mutex> lock(g_repl->eval_mutex);
+        g_repl->evaluating = false;
+    }
+    if (try_catch.HasTerminated()) {
+        isolate->CancelTerminateExecution();
+        PrintResult("Script execution was interrupted by `SIGINT`");
+        return true;
+    }
+    isolate->CancelTerminateExecution();
+    if (!ok) {
+        PrintException(context, try_catch);
+        return true;
+    }
+    if (!result->IsPromise()) return true;
+    g_repl->awaiting = true;
+    Local<Value> id = Integer::New(isolate, ++g_repl->await_id);
+    Local<Function> on_fulfilled = Function::New(context, OnAwaitFulfilled, id).ToLocalChecked();
+    Local<Function> on_rejected = Function::New(context, OnAwaitRejected, id).ToLocalChecked();
+    (void)result.As<Promise>()->Then(context, on_fulfilled, on_rejected);
+    return true;
+}
+
 // Evaluate the buffered input; keeps it buffered if it is incomplete
 void Evaluate() {
     Isolate* isolate = g_repl->isolate;
@@ -251,6 +622,7 @@ void Evaluate() {
             return;
         }
         g_repl->buffer.clear();
+        if (NeedsAsyncWrap(try_catch) && EvaluateAsync(context, code, name)) return;
         PrintException(context, try_catch);
         return;
     }
@@ -317,6 +689,12 @@ void RunCommand(const std::string& line) {
         fputs(kHelpText, stdout);
     } else if (command == ".break") {
         g_repl->buffer.clear();
+    } else if (command == ".editor" && g_repl->terminal) {
+        // Lines are collected without running them; Ctrl+D runs them all
+        g_repl->buffer.clear();
+        g_repl->editor_mode = true;
+        g_repl->editor_buffer.clear();
+        PrintResult("// Entering editor mode (Ctrl+D to finish, Ctrl+C to cancel)");
     } else if (command == ".clear") {
         g_repl->buffer.clear();
         PrintResult("Clearing context...");
@@ -445,9 +823,9 @@ std::vector<std::string> CompleteLine(const std::string& line, size_t* word_star
 // Input
 
 void ShowPrompt() {
-    if (!g_repl->running) return;
+    if (!g_repl->running || g_repl->awaiting) return;
     if (g_repl->terminal) {
-        g_repl->editor->Start(Prompt());
+        g_repl->editor->Start(g_repl->editor_mode ? "" : Prompt());
         g_repl->prompt_shown = true;
     } else {
         fputs(Prompt(), stdout);
@@ -480,9 +858,41 @@ void OnInterrupt(const std::string& line) {
     ShowPrompt();
 }
 
+// .editor mode: Enter adds a line, Ctrl+D runs them, Ctrl+C drops them
+bool FeedEditorMode(frogjs::LineEditor::Event event, const std::string& line) {
+    switch (event) {
+        case frogjs::LineEditor::Event::kLine:
+            g_repl->editor_buffer += line + "\n";
+            HidePrompt();
+            ShowPrompt();
+            return true;
+        case frogjs::LineEditor::Event::kEof:
+            HidePrompt();
+            g_repl->editor_mode = false;
+            g_repl->buffer = g_repl->editor_buffer;
+            g_repl->session.push_back(g_repl->editor_buffer);
+            g_repl->editor_buffer.clear();
+            Evaluate();
+            g_repl->buffer.clear();
+            ShowPrompt();
+            return true;
+        case frogjs::LineEditor::Event::kInterrupt:
+            HidePrompt();
+            g_repl->editor_mode = false;
+            g_repl->editor_buffer.clear();
+            ShowPrompt();
+            return true;
+        case frogjs::LineEditor::Event::kNone:
+            return false;
+    }
+    return false;
+}
+
 void FeedTerminal(unsigned char byte) {
     std::string line;
-    switch (g_repl->editor->Feed(byte, &line)) {
+    frogjs::LineEditor::Event event = g_repl->editor->Feed(byte, &line);
+    if (g_repl->editor_mode && FeedEditorMode(event, line)) return;
+    switch (event) {
         case frogjs::LineEditor::Event::kLine:
             HidePrompt();
             g_repl->editor->AddHistory(line);
@@ -504,18 +914,27 @@ void FeedTerminal(unsigned char byte) {
 // Non-terminal input (a pipe or file): no line editing, just lines
 void ProcessPendingLines(bool at_eof) {
     size_t newline;
-    while (g_repl->running && (newline = g_repl->pending_input.find('\n')) != std::string::npos) {
+    while (g_repl->running && !g_repl->awaiting && (newline = g_repl->pending_input.find('\n')) != std::string::npos) {
         std::string line = g_repl->pending_input.substr(0, newline);
         g_repl->pending_input.erase(0, newline + 1);
         if (!line.empty() && line.back() == '\r') line.pop_back();
         HandleLine(line);
         ShowPrompt();
     }
+    if (at_eof && g_repl->awaiting) {
+        // Finish the await first (ResumeInput comes back here)
+        g_repl->eof_pending = true;
+        return;
+    }
     if (at_eof && g_repl->running) {
         if (!g_repl->pending_input.empty()) {
             std::string line;
             line.swap(g_repl->pending_input);
             HandleLine(line);
+            if (g_repl->awaiting) {
+                g_repl->eof_pending = true;
+                return;
+            }
         }
         if (g_repl->running) fputc('\n', stdout);
         Close();
@@ -533,7 +952,14 @@ void ReadStdin() {
             Close();
             return;
         }
-        for (ssize_t i = 0; i < n && g_repl->running; i++) FeedTerminal(static_cast<unsigned char>(chunk[i]));
+        for (ssize_t i = 0; i < n && g_repl->running; i++) {
+            if (g_repl->awaiting) {
+                // Typed while an await runs: kept for the next prompt
+                g_repl->typeahead.append(chunk + i, static_cast<size_t>(n - i));
+                break;
+            }
+            FeedTerminal(static_cast<unsigned char>(chunk[i]));
+        }
     } else if (n > 0) {
         g_repl->pending_input.append(chunk, static_cast<size_t>(n));
         ProcessPendingLines(false);
@@ -550,6 +976,27 @@ void OnStdinReadable(uv_poll_t* handle, int status, int events) {
         return;
     }
     ReadStdin();
+}
+
+// After an await settles: the prompt, then what was typed meanwhile
+void ResumeInput() {
+    if (!g_repl->running) return;
+    ShowPrompt();
+    if (g_repl->terminal) {
+        std::string pending;
+        pending.swap(g_repl->typeahead);
+        for (size_t i = 0; i < pending.size() && g_repl->running; i++) {
+            if (g_repl->awaiting) {
+                g_repl->typeahead = pending.substr(i) + g_repl->typeahead;
+                return;
+            }
+            FeedTerminal(static_cast<unsigned char>(pending[i]));
+        }
+    } else {
+        bool eof = g_repl->eof_pending;
+        g_repl->eof_pending = false;
+        ProcessPendingLines(eof);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -583,7 +1030,16 @@ void Watchdog(ReplState* repl) {
 
 void OnSigintAtPrompt(uv_async_t* handle) {
     (void)handle;
-    if (g_repl->running && g_repl->prompt_shown) FeedTerminal(3);
+    if (!g_repl->running) return;
+    if (g_repl->awaiting) {
+        // Stop waiting; the promise's result, when it comes, is ignored
+        g_repl->awaiting = false;
+        g_repl->typeahead.clear();
+        PrintResult("Uncaught:\nScript execution was interrupted by `SIGINT`");
+        ResumeInput();
+        return;
+    }
+    if (g_repl->prompt_shown) FeedTerminal(3);
 }
 
 void InstallSigint() {
@@ -688,8 +1144,22 @@ int StartREPL(Isolate* isolate, Local<Context> context, ContextFactory new_conte
     ShowPrompt();
 
     if (!state.poll_active) {
-        // stdin can't be polled (e.g. a regular file): read it synchronously
-        while (state.running) ReadStdin();
+        // stdin can't be polled (e.g. a regular file): read it synchronously,
+        // running the event loop while a top-level await waits
+        while (state.running) {
+            if (state.awaiting || state.eof_pending) {
+                uv_run(loop, UV_RUN_ONCE);
+                DrainTasks(isolate);
+                if (!state.awaiting && !state.eof_pending) continue;
+                if (state.awaiting && !uv_loop_alive(loop)) {
+                    // Nothing left that could settle it
+                    state.awaiting = false;
+                    ResumeInput();
+                }
+                continue;
+            }
+            ReadStdin();
+        }
     }
 
     // Run the event loop until the REPL closes. .clear stops the loop so it

@@ -6,7 +6,7 @@
 namespace frogjs {
 
 // Byte encodings understood by Buffer and crypto (names as in Node.js)
-enum class Encoding { kUtf8, kHex, kBase64, kBase64Url, kLatin1, kAscii };
+enum class Encoding { kUtf8, kHex, kBase64, kBase64Url, kLatin1, kAscii, kUtf16le };
 
 // Parse an encoding name ("utf8", "UTF-8", "hex", "binary", ...). Returns false
 // for unknown names.
