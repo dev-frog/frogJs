@@ -497,16 +497,130 @@ Measured on macOS on Apple Silicon, 2026-11-09:
 
 ---
 
-## 🚀 What Could Come Next
+## 🚀 Roadmap for 1.x
 
-New features after 1.0 are additive: see the [API stability policy](docs/api-stability.md). Candidates:
-- ES modules
-- TLS and `https`
-- Ciphers (`createCipheriv`/`createDecipheriv`, AES-GCM), `scrypt`, `hkdf`, signatures
-- `child_process.fork()` with an IPC channel
-- Global `URL` and `URLSearchParams`, `AbortController`, `fetch`
-- Top-level `await` and `.editor` in the REPL
-- `node:assert`, `node:readline`, `node:dns`
-- An official Linux build, with SHA-NI on x86-64
-- The benchmarks still over 2x: `stream` overhead, `crypto.createHash` setup, hex and base64 with SIMD
-- Reformat the older C++ with clang-format, then enforce `make format-check` in CI; clang-tidy
+Every 1.x release is additive: no API that 1.0 has changes or goes away. See the [API stability policy](docs/api-stability.md). Each release keeps the 1.0 bar: tests that run under both FrogJS and Node.js, TypeScript declarations checked by `make check-types`, documentation checked by `make check-docs`, 90%+ coverage, and no new leaks.
+
+### Version 1.0.0 - Final release
+
+**Priority: CRITICAL**
+
+1.0.0 was only published as `v1.0.0-rc.1`. Because GitHub's `releases/latest` skips pre-releases, `install.sh` falls back to `main` for everyone.
+
+- [ ] Tag `v1.0.0` on `main` and publish it as a full release, so `install.sh` installs it by default
+- [ ] Confirm the [support policy](docs/support-policy.md) and remove its draft note: only the maintainer can make that promise
+- [ ] The API stability clock (6+ months, the one unmet 1.0 criterion) starts here
+
+---
+
+### Version 1.1.0 - Run Real npm Code
+
+**Priority: HIGH**
+
+**Theme:** most modern npm packages load and run unchanged.
+
+#### ES Modules
+- [ ] `import`/`export`, `.mjs`, and `"type": "module"` in `package.json`
+- [ ] Dynamic `import()` from both CommonJS and ESM
+- [ ] `import.meta.url`, `import.meta.dirname`, `import.meta.filename`
+- [ ] `package.json` `exports` conditions: `import`, `require`, `default`
+- [ ] Interop: importing CommonJS gives `module.exports` as the default export; `require()` of ESM throws `ERR_REQUIRE_ESM`, as in Node.js
+- [ ] `node:` builtins importable as ES modules
+- [ ] Top-level `await` in ES modules
+
+**Implementation Notes:**
+- Built on V8's `v8::Module` API (`CompileModule`, `InstantiateModule`, `ResolveModuleCallback`, and `HostImportModuleDynamicallyCallback` for `import()`), next to the CommonJS loader in `src/bindings/modules.cpp`. Resolution reuses the existing `node_modules` and `exports` logic.
+
+#### Web Globals
+- [ ] `URL` and `URLSearchParams` (WHATWG URL Standard), and the `url` module (`fileURLToPath`, `pathToFileURL`)
+- [ ] `EventTarget` and `Event`
+- [ ] `AbortController` and `AbortSignal` (`abort()`, `timeout()`, `any()`), accepted as `signal` by timers' promises, `fs.promises`, `child_process` and `events.once`
+- [ ] `atob` and `btoa`
+
+#### Small Modules
+- [ ] `assert` and `assert/strict` (`deepStrictEqual` with the same error messages as Node.js)
+- [ ] `readline` and `readline/promises` (built on the REPL's existing `line_editor`)
+- [ ] `string_decoder` and `querystring`
+- [ ] `util.parseArgs`, `util.styleText`
+
+#### REPL
+- [ ] Top-level `await`
+- [ ] `.editor` mode
+
+#### Performance
+Bring the benchmarks still over 2x of Node.js under it (see [performance](docs/performance.md)):
+- [ ] `stream-pipe` (2.9x): stream overhead
+- [ ] `sha256-small` (2.9x): `crypto.createHash` setup cost
+- [ ] `buffer-hex-base64` (2.2x): SIMD hex and base64
+- [ ] `timers` and `sha256-large` (at 2x): headroom
+
+**1.1.0 Success Criteria:**
+- A set of popular ESM-only and dual packages (picked when 1.1 work starts and listed in the tests) load and pass their basic usage
+- All 23 benchmarks within 2x of Node.js
+
+---
+
+### Version 1.2.0 - Talk to the Internet
+
+**Priority: HIGH**
+
+**Theme:** secure networking. This release adds FrogJS's first crypto library dependency, so it starts with a decision.
+
+#### Decision First: the TLS Library
+1.0 advertises "no OpenSSL dependency". TLS needs one of:
+
+| Option | For | Against |
+|--------|-----|---------|
+| OpenSSL 3 (Homebrew) | What Node.js uses: same cipher names and error codes | Large; ends the "no OpenSSL" claim |
+| BoringSSL | Smaller, used by Chrome | No stable API or releases; usually vendored |
+| mbedTLS | Small, easy to embed | Fewer ciphers; Node-compatible behavior takes more work |
+
+Record the choice and the reasons in [architecture](docs/architecture.md) before writing code.
+
+#### TLS & HTTPS
+- [ ] `tls`: `connect`, `createServer`, `TLSSocket` as a Duplex stream, certificate verification, SNI, ALPN
+- [ ] `https`: `request`, `get`, `createServer`, on top of the existing `http`
+- [ ] `http.Agent` with connection pooling, for both `http` and `https`
+
+#### fetch
+- [ ] `fetch`, `Request`, `Response`, `Headers`, `FormData`, `Blob`
+- [ ] Web Streams (`ReadableStream`, `WritableStream`, `TransformStream`), which `fetch` bodies need
+- [ ] `signal` support through the 1.1 `AbortController`
+- [ ] `zlib` (gzip, deflate) for compressed responses; system zlib is on every supported platform
+
+#### Crypto (free once a TLS library is linked)
+- [ ] `createCipheriv`/`createDecipheriv` with AES-GCM and AES-CBC
+- [ ] `scrypt`, `hkdf`, `randomFill`/`randomFillSync`
+- [ ] `KeyObject`, `generateKeyPair`, `sign`/`verify`
+- [ ] Web Crypto `crypto.subtle` (later in 1.2 if it doesn't fit)
+
+#### Other
+- [ ] `dns`: `lookup`, `resolve`, `dns/promises` (libuv's `getaddrinfo`)
+
+---
+
+### Version 1.3.0 - Platforms & Processes
+
+**Priority: MEDIUM**
+
+- [ ] **An official Linux build**: x86-64 and arm64 in CI and in releases, Linux moves to "Supported" in the [support policy](docs/support-policy.md), SHA-NI on x86-64, and a leak check with Valgrind or LSan
+- [ ] `child_process.fork()` with an IPC channel (`stdio: 'ipc'`, `child.send()`, `process.send()`)
+- [ ] Worker extras: `resourceLimits`, `workerData` environment, `BroadcastChannel`, ES module workers
+- [ ] `AbortSignal` options for `child_process`
+
+---
+
+### Ongoing (every release)
+
+- [ ] Reformat the older C++ with clang-format, then enforce `make format-check` in CI
+- [ ] clang-tidy, once there is a compile database
+- [ ] Rerun `make leakcheck` and the benchmarks against the V8 that Homebrew ships, not only 13.5
+- [ ] Publish the TypeScript declarations to npm (`@types`-style package)
+- [ ] A CMake build that matches the Makefile
+- [ ] An independent, third-party security review (1.0's was internal)
+
+### Not Planned for 1.x
+
+- Breaking changes of any kind: those wait for 2.0
+- Native Windows: WSL stays the way to run FrogJS on Windows
+- Native addons (`.node` files, N-API)
