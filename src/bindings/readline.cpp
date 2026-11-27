@@ -225,7 +225,7 @@ const lineEnding = /\r?\n|\r(?!\n)/g;
 class Interface extends EventEmitter {
   constructor(input, output, completer, terminal) {
     super();
-    let options = input;
+    let options;
     if (!(input && typeof input.on === 'function' && !('input' in input))) {
       options = input || {};
     } else {

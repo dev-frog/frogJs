@@ -73,7 +73,7 @@ const kDOMException = Symbol('DOMException');
 
 class DOMException {
   constructor(message = '', options = 'Error') {
-    let name = 'Error';
+    let name;
     if (options !== null && typeof options === 'object') {
       name = 'name' in options ? String(options.name) : 'Error';
       if ('cause' in options) {

@@ -22,7 +22,12 @@ run(async () => {
     [false, false, false, false, false]);
 
   section('util functions');
-  const cb = util.callbackify(async (fail) => { if (fail) throw null; return 5; });
+  const cb = util.callbackify(async (fail) => {
+    // A falsy rejection is what this checks
+    // eslint-disable-next-line no-throw-literal
+    if (fail) throw null;
+    return 5;
+  });
   check('callbackify', await new Promise((resolve) => cb(0, (err, value) => resolve([err, value]))), [null, 5]);
   const falsy = await new Promise((resolve) => cb(1, resolve));
   check('callbackify with a falsy rejection', [falsy.code, falsy.message, falsy.reason], ['ERR_FALSY_VALUE_REJECTION', 'Promise was rejected with falsy value', null]);

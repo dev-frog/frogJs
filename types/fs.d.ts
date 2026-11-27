@@ -19,8 +19,9 @@ declare module 'fs' {
     type Mode = string | number;
     type Callback = (err: FsError | null) => void;
 
-    interface ReadOptions { encoding?: BufferEncoding | 'buffer' | null; flag?: Flags; }
-    interface WriteOptions { encoding?: BufferEncoding | null; mode?: Mode; flag?: Flags; }
+    /** `signal` (readFile and writeFile, callback and promise forms): aborting fails the call with an AbortError. */
+    interface ReadOptions { encoding?: BufferEncoding | 'buffer' | null; flag?: Flags; signal?: AbortSignal; }
+    interface WriteOptions { encoding?: BufferEncoding | null; mode?: Mode; flag?: Flags; signal?: AbortSignal; }
     interface MkdirOptions { mode?: Mode; recursive?: boolean; }
     interface RmOptions { recursive?: boolean; force?: boolean; }
     interface StatOptions { throwIfNoEntry?: boolean; }
@@ -74,7 +75,7 @@ declare module 'fs' {
     function readFileSync(path: PathLike | number, options?: { encoding?: null | 'buffer'; flag?: Flags } | null): Buffer;
     function readFileSync(path: PathLike | number, options: BufferEncoding | (ReadOptions & { encoding: BufferEncoding })): string;
     function readFile(path: PathLike | number, callback: (err: FsError | null, data: Buffer) => void): void;
-    function readFile(path: PathLike | number, options: { encoding?: null | 'buffer'; flag?: Flags } | null, callback: (err: FsError | null, data: Buffer) => void): void;
+    function readFile(path: PathLike | number, options: { encoding?: null | 'buffer'; flag?: Flags; signal?: AbortSignal } | null, callback: (err: FsError | null, data: Buffer) => void): void;
     function readFile(path: PathLike | number, options: BufferEncoding | (ReadOptions & { encoding: BufferEncoding }), callback: (err: FsError | null, data: string) => void): void;
 
     function writeFileSync(path: PathLike | number, data: Data, options?: WriteOptions | BufferEncoding | null): void;
@@ -212,7 +213,7 @@ declare module 'fs' {
     function createWriteStream(path: PathLike | null, options?: BufferEncoding | WriteStreamOptions): WriteStream;
 
     namespace promises {
-        function readFile(path: PathLike | number, options?: { encoding?: null | 'buffer'; flag?: Flags } | null): Promise<Buffer>;
+        function readFile(path: PathLike | number, options?: { encoding?: null | 'buffer'; flag?: Flags; signal?: AbortSignal } | null): Promise<Buffer>;
         function readFile(path: PathLike | number, options: BufferEncoding | (ReadOptions & { encoding: BufferEncoding })): Promise<string>;
         function writeFile(path: PathLike | number, data: Data, options?: WriteOptions | BufferEncoding | null): Promise<void>;
         function appendFile(path: PathLike | number, data: Data, options?: WriteOptions | BufferEncoding | null): Promise<void>;

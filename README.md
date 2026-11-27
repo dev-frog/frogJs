@@ -138,7 +138,7 @@ Run it:
 Run `frogjs` with no script to start an interactive shell:
 ```
 $ ./build/frogjs
-Welcome to FrogJS v1.0.0.
+Welcome to FrogJS v1.1.0.
 Type ".help" for more information.
 > const server = { port: 3000, routes: ['/', '/api'] }
 undefined
@@ -165,7 +165,7 @@ frogjs -p "os.cpus().length"      # evaluate and print the result
 frogjs -c script.js               # syntax check only
 frogjs -i -e "var x = 1"          # run code, then start the REPL
 echo "console.log('hi')" | frogjs # read the script from stdin
-frogjs --version                  # v1.0.0
+frogjs --version                  # v1.1.0
 frogjs --help                     # all options
 ```
 
@@ -444,7 +444,7 @@ frogjs/
 
 ## Current Status
 
-**1.0.0**: see the [changelog](CHANGELOG.md), and the [API stability](docs/api-stability.md) and [support](docs/support-policy.md) policies.
+**1.1.0**: see the [changelog](CHANGELOG.md), and the [API stability](docs/api-stability.md) and [support](docs/support-policy.md) policies.
 
 ### Implemented
 - Core runtime with V8 integration; uncaught errors and unhandled rejections end the process with a report, as in Node.js
@@ -454,9 +454,11 @@ frogjs/
 - TCP: Duplex sockets with backpressure, EventEmitter servers, DNS, timeouts
 - HTTP server/client: keep-alive, chunked encoding, pipelining, backpressure and request timeouts
 - Events (EventEmitter, events.once, events.on) and streams (Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished)
-- Module system: node_modules, package.json (main, exports), JSON, circular requires, require.resolve/cache/main
-- REPL (history, tab completion, multi-line input, commands) and CLI options
-- Util (inspect, format, promisify, inherits, isDeepStrictEqual)
+- Module system: CommonJS and ES modules (import/export, import(), import.meta, top-level await, require() of ES modules), node_modules, package.json (main, type, exports and imports with conditions and patterns), JSON, circular requires
+- Web globals: URL, URLSearchParams, EventTarget, Event, AbortController, AbortSignal, DOMException, atob, btoa
+- url, querystring, string_decoder, assert, readline, tty and timers/promises modules
+- REPL (history, tab completion, multi-line input, top-level await, .editor, commands) and CLI options
+- Util (inspect, format, promisify, callbackify, parseArgs, styleText, types, deprecate, debuglog, isDeepStrictEqual)
 - Crypto (createHash, createHmac, pbkdf2, randomBytes, randomUUID, randomInt, getRandomValues, timingSafeEqual)
 - Child processes (spawn, exec, execFile, spawnSync, execSync, execFileSync)
 - Worker threads (Worker, parentPort, workerData, MessageChannel, SharedArrayBuffer), structuredClone
@@ -467,7 +469,7 @@ frogjs/
 - Tooling: `make check`, `test-asan`, `leakcheck`, `coverage`, `bench`, `fuzz`
 
 ### Not included
-ES modules, TLS/HTTPS, ciphers and signatures, `child_process.fork()` with IPC, a global `URL`, `fetch`, Windows. Possible later versions are in the [roadmap](ROADMAP.md).
+TLS/HTTPS, ciphers and signatures, `crypto.subtle`, `child_process.fork()` with IPC, `fetch`, Windows. Possible later versions are in the [roadmap](ROADMAP.md).
 
 ## Documentation
 
@@ -560,7 +562,7 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Version**: 1.0.0 — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
+**Version**: 1.1.0 — see [Releases](https://github.com/dev-frog/frogJs/releases) for the latest
 **Status**: Stable (macOS on Apple Silicon)
 **Last Updated**: 2026-11-09
 

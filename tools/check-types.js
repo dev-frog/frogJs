@@ -5,9 +5,9 @@
 //
 // Every value a module declares (functions, constants, classes) must exist in
 // the module FrogJS returns, and every method a declared class has must be on
-// its prototype; so must the declared globals. Exports FrogJS has but the
-// declarations leave out are listed too, as a reminder. Exits with 1 if
-// anything declared is missing.
+// its prototype; so must the declared globals. It is also an error the other
+// way around: a built-in module, export or global FrogJS has that types/
+// doesn't declare. Exits with 1 if anything is missing on either side.
 'use strict';
 
 const path = require('path');
@@ -80,7 +80,8 @@ function declarations() {
 }
 
 // Runs inside FrogJS: report what is missing
-const kRuntimeCheck = `
+// (In a function, so that its own names aren't globals)
+const kRuntimeCheck = `(() => {
 const { modules, globals } = JSON.parse(process.argv[process.argv.length - 1]);
 const missing = [];
 const undeclared = [];
@@ -96,8 +97,8 @@ function checkClass(label, value, info) {
   }
 }
 
-function checkValue(label, value, info) {
-  if (value === undefined) return missing.push(label);
+function checkValue(label, value, info, present = value !== undefined) {
+  if (!present) return missing.push(label);
   if (info.kind === 'class') checkClass(label, value, info);
 }
 
@@ -105,7 +106,8 @@ for (const [name, entry] of Object.entries(modules)) {
   const module = require(name);
   if (entry.self) checkValue("require('" + name + "')", module, entry.self);
   for (const [key, info] of Object.entries(entry.exports)) {
-    checkValue("require('" + name + "')." + key, module[key], info);
+    // A property may be declared and be undefined for now (process.exitCode)
+    checkValue("require('" + name + "')." + key, module[key], info, key in Object(module));
   }
   for (const key of Object.getOwnPropertyNames(module)) {
     if (['length', 'name', 'prototype', 'arguments', 'caller', 'init'].includes(key) || key.startsWith('_')) continue;
@@ -114,15 +116,32 @@ for (const [name, entry] of Object.entries(modules)) {
 }
 for (const [name, info] of Object.entries(globals)) checkValue(name, globalThis[name], info);
 
+// Every built-in module needs a declaration
+for (const name of require('module').builtinModules) {
+  if (!(name in modules)) undeclared.push("require('" + name + "') (the whole module)");
+}
+
+// So does every global that isn't part of the JavaScript language
+const language = new Set(JSON.parse(process.argv[process.argv.length - 2]));
+for (const name of Object.getOwnPropertyNames(globalThis)) {
+  if (!language.has(name) && !(name in globals) && !(name in modules)) undeclared.push(name + ' (a global)');
+}
+
 console.log(JSON.stringify({ missing, undeclared }));
+})();
 `;
 
 function main() {
     const declared = declarations();
     const moduleCount = Object.keys(declared.modules).length;
+    // The globals of plain V8, which the TypeScript library declares: each
+    // global FrogJS adds must be in types/
+    const language = JSON.parse(execFileSync(process.execPath,
+        ['-e', 'console.log(JSON.stringify(Object.getOwnPropertyNames(require("vm").runInNewContext("globalThis"))))'],
+        { encoding: 'utf8' }));
     let output;
     try {
-        output = execFileSync(frogjs, ['-e', kRuntimeCheck, JSON.stringify(declared)], { encoding: 'utf8' });
+        output = execFileSync(frogjs, ['-e', kRuntimeCheck, JSON.stringify(language), JSON.stringify(declared)], { encoding: 'utf8' });
     } catch (err) {
         console.error(`Could not run ${frogjs}: ${err.message}`);
         process.exit(1);
@@ -130,14 +149,14 @@ function main() {
     const { missing, undeclared } = JSON.parse(output.trim().split('\n').pop());
 
     if (undeclared.length > 0) {
-        console.log(`Not in the declarations (${undeclared.length}):`);
-        for (const name of undeclared) console.log(`  ${name}`);
+        console.error(`In FrogJS but not declared in types/ (${undeclared.length}):`);
+        for (const name of undeclared) console.error(`  ${name}`);
     }
     if (missing.length > 0) {
         console.error(`Declared but missing at run time (${missing.length}):`);
         for (const name of missing) console.error(`  ${name}`);
-        process.exit(1);
     }
+    if (undeclared.length > 0 || missing.length > 0) process.exit(1);
     console.log(`types/ matches FrogJS: ${moduleCount} modules and ${Object.keys(declared.globals).length} globals checked`);
 }
 

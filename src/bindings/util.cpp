@@ -63,7 +63,6 @@ const kArrayType = 1;
 const kArrayExtrasType = 2;
 
 // ANSI escape sequences: colors, cursor movement, OSC (as Node.js matches them)
-// eslint-disable-next-line no-control-regex
 const ansiPattern = new RegExp('[\\u001B\\u009B][[\\]()#;?]*' +
   '(?:(?:(?:(?:;[-a-zA-Z\\d\\/\\#&.:=?%@~_]+)*' +
   '|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/\\#&.:=?%@~_]*)*)?' +

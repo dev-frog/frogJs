@@ -191,7 +191,9 @@ require(id)
   └── on an exception: remove it from the cache, so requiring it again runs it again
 ```
 
-A file given on the command line is a module too (`RunMainModule()`). `-e` code, stdin and the REPL run as plain scripts, with `module`, `exports`, `__filename` and `__dirname` as globals. ES modules are not supported.
+A file given on the command line is a module too (`RunMainModule()`). `-e` code, stdin and the REPL run as plain scripts, with `module`, `exports`, `__filename` and `__dirname` as globals, unless their syntax makes them ES modules.
+
+ES modules (`src/bindings/esm.cpp`) use V8's `v8::Module`: resolution and format detection are in the same JavaScript as the CommonJS loader (`modules.cpp`), and `esm.cpp` compiles, links and evaluates, wraps CommonJS and built-ins as synthetic modules, and handles `import()` and `import.meta`. A `.js` file with no `"type"` is compiled as CommonJS first and run as a module only if that fails with module syntax, as Node.js does.
 
 ## Errors
 
@@ -284,7 +286,7 @@ StartREPL()
 ## Known limitations
 
 See the [roadmap](../ROADMAP.md) for what may come.
-- No ES modules, TLS/HTTPS, ciphers, signatures, IPC between processes, global `URL`, or `fetch`.
+- No TLS/HTTPS, ciphers, signatures, `crypto.subtle`, IPC between processes, or `fetch`.
 - `process.nextTick` shares the microtask queue with promises.
 - `process.env` is a plain object: changing it doesn't call `setenv()`, though child processes get its current content.
 - `fs` paths are UTF-8 strings; there is no `encoding` option for names.

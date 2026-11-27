@@ -184,7 +184,7 @@ function createErrDiff(actual, expected, operator, customMessage) {
     operator = 'strictEqualObject';
   }
   let skipped = false;
-  let message = '';
+  let message;
   const inspectedActual = inspectValue(actual);
   const inspectedExpected = inspectValue(expected);
   const splitActual = inspectedActual.split('\n');
@@ -286,6 +286,8 @@ function innerFail(options) {
 function isDeepLooseEqual(a, b, memo) {
   if (a === b) return true;
   if (a === null || typeof a !== 'object') {
+    // Loose equality is the point of deepEqual
+    // eslint-disable-next-line eqeqeq
     if (b === null || typeof b !== 'object') return a == b || (Number.isNaN(a) && Number.isNaN(b));
     return false;
   }
@@ -299,6 +301,7 @@ function isDeepLooseEqual(a, b, memo) {
     if (a.message !== b.message || a.name !== b.name) return false;
   } else if (ArrayBuffer.isView(a) && ArrayBuffer.isView(b)) {
     if (a.length !== b.length) return false;
+    // eslint-disable-next-line eqeqeq
     for (let i = 0; i < a.length; i++) if (a[i] != b[i]) return false;
   }
   memo = memo || { a: new Map(), b: new Map() };
@@ -410,6 +413,7 @@ function getErrMessage(fn) {
     const code = fs.readFileSync(filename, 'utf8').split('\n').slice(line).join('\n');
     const found = extractCall(code, column);
     if (found) {
+      // eslint-disable-next-line no-control-regex -- escapes control characters in the message
       let text = found.text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
       // Lines after the first lose the indentation of the first
       if (text.includes('\n')) {
@@ -459,6 +463,8 @@ function missing(...names) {
 
 function equal(actual, expected, message) {
   if (arguments.length < 2) throw missing('actual', 'expected');
+  // assert.equal is loose (==) by definition
+  // eslint-disable-next-line eqeqeq
   if (actual != expected && (!Number.isNaN(actual) || !Number.isNaN(expected))) {
     innerFail({ actual, expected, message, operator: '==', stackStartFn: equal });
   }
@@ -466,6 +472,7 @@ function equal(actual, expected, message) {
 
 function notEqual(actual, expected, message) {
   if (arguments.length < 2) throw missing('actual', 'expected');
+  // eslint-disable-next-line eqeqeq
   if (actual == expected || (Number.isNaN(actual) && Number.isNaN(expected))) {
     innerFail({ actual, expected, message, operator: '!=', stackStartFn: notEqual });
   }
@@ -605,7 +612,7 @@ function expectedException(actual, expected, message, fn) {
     }
   } else if (expected.prototype !== undefined && actual instanceof expected) {
     return;
-  } else if (Error.isPrototypeOf(expected) || expected === Error) {
+  } else if (Object.prototype.isPrototypeOf.call(Error, expected) || expected === Error) {
     if (!message) {
       generatedMessage = true;
       message = 'The error is expected to be an instance of ' + `"${expected.name}". Received `;
@@ -705,7 +712,7 @@ function hasMatchingError(actual, expected) {
     throw invalidArgType('expected', 'of type function or an instance of RegExp', expected);
   }
   if (expected.prototype !== undefined && actual instanceof expected) return true;
-  if (Error.isPrototypeOf(expected)) return false;
+  if (Object.prototype.isPrototypeOf.call(Error, expected)) return false;
   return expected.call({}, actual) === true;
 }
 

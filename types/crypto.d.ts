@@ -51,4 +51,16 @@ declare module 'crypto' {
 
     /** Compare two equal-length byte sequences in constant time. */
     function timingSafeEqual(a: ArrayBufferView | ArrayBuffer | Buffer, b: ArrayBufferView | ArrayBuffer | Buffer): boolean;
+
+    /** Fill `buffer` (from `offset`, `size` bytes) with random bytes. */
+    function randomFillSync<T extends ArrayBufferView | ArrayBuffer>(buffer: T, offset?: number, size?: number): T;
+    function randomFill<T extends ArrayBufferView | ArrayBuffer>(buffer: T, callback: (err: Error | null, buf: T) => void): void;
+    function randomFill<T extends ArrayBufferView | ArrayBuffer>(buffer: T, offset: number, callback: (err: Error | null, buf: T) => void): void;
+    function randomFill<T extends ArrayBufferView | ArrayBuffer>(buffer: T, offset: number, size: number, callback: (err: Error | null, buf: T) => void): void;
+
+    /** The Web Crypto object. FrogJS has no `subtle` yet: only random values and UUIDs. */
+    const webcrypto: {
+        getRandomValues<T extends ArrayBufferView>(typedArray: T): T;
+        randomUUID(): `${string}-${string}-${string}-${string}-${string}`;
+    };
 }

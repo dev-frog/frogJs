@@ -359,7 +359,7 @@ function detectFormat(file, source) {
   detected.set(file, format);
   if (format === 'module') {
     const scope = packageScope(file);
-    if (scope) {
+    if (scope && scope.pkg.type === undefined) {
       process.emitWarning(`Module type of ${pathToFileURL(file).href} is not specified and it doesn't parse as CommonJS.\n` +
         'Reparsing as ES module because module syntax was detected. This incurs a performance overhead.\n' +
         `To eliminate this warning, add "type": "module" to ${path.join(scope.dir, 'package.json')}.`,
@@ -392,7 +392,11 @@ class Module {
     this.filename = filename;
     this.path = path.dirname(filename);
     this.paths = nodeModulePaths(this.path);
-    const format = filename.endsWith('.json') ? 'json' : formatOf(filename);
+    let format = filename.endsWith('.json') ? 'json' : formatOf(filename);
+    // require() reads "type" only for .js files, as in Node.js: a file with no
+    // extension is CommonJS unless it only parses as an ES module (yargs's
+    // yargs/yargs is CommonJS in a "type": "module" package)
+    if (format === 'module' && path.extname(filename) === '') format = 'detect';
     if (format === 'json') {
       this.loadJson(filename);
     } else if (format === 'module') {
@@ -638,8 +642,6 @@ function unsupportedScheme(protocol) {
 // The names a CommonJS module exports, found by reading its source the way
 // Node.js's cjs-module-lexer does: assignments to exports.name, defineProperty,
 // object literals assigned to module.exports, and re-exports of other modules
-const identifier = /^[A-Za-z_$][\w$]*$/;
-
 function objectLiteralKeys(source, start, names, reexports) {
   // The rules of cjs-module-lexer's tryParseLiteralExports: an identifier key
   // counts unless `key: value` has a value that isn't an identifier; a string

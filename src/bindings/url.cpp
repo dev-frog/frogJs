@@ -98,6 +98,7 @@ void ToUnicode(const FunctionCallbackInfo<Value>& args) { Convert(args, false); 
 static const char* kUrlSource = R"JS(
 (function (path, util, querystring, idna) {
 'use strict';
+/* eslint-disable no-control-regex -- the URL Standard is written in terms of C0 control code points */
 
 const inspectCustom = Symbol.for('nodejs.util.inspect.custom');
 
@@ -261,9 +262,12 @@ const forbiddenHost = /[\u0000\u0009\u000A\u000D #/:<>?@[\\\]^|]/;
 const forbiddenDomain = /[\u0000- #%/:<>?@[\\\]^|\u007F]/;
 
 // Code points UTS #46 ignores, and ones it disallows outright
-const idnaIgnored = /[­͏᠋-᠍᠏​⁠⁤︀-️﻿\u{1BCA0}-\u{1BCA3}\u{E0100}-\u{E01EF}]/gu;
-const idnaDisallowed = /[‌‍�﷐-﷯￾￿]|[\u{1FFFE}\u{1FFFF}\u{2FFFE}\u{2FFFF}\u{EFFFE}\u{EFFFF}\u{10FFFE}\u{10FFFF}]/u;
-const idnaDots = /[。．｡]/g;
+// Each class is a list of single code points, not characters to combine
+// eslint-disable-next-line no-misleading-character-class
+const idnaIgnored = /[\u00AD\u034F\u180B-\u180D\u180F\u200B\u2060\u2064\uFE00-\uFE0F\uFEFF\u{1BCA0}-\u{1BCA3}\u{E0100}-\u{E01EF}]/gu;
+// eslint-disable-next-line no-misleading-character-class
+const idnaDisallowed = /[\u200C\u200D\uFFFD\uFDD0-\uFDEF\uFFFE\uFFFF]|[\u{1FFFE}\u{1FFFF}\u{2FFFE}\u{2FFFF}\u{EFFFE}\u{EFFFF}\u{10FFFE}\u{10FFFF}]/u;
+const idnaDots = /[\u3002\uFF0E\uFF61]/g;
 
 // Without ICU: lowercase, NFKC and Punycode, close to UTS #46 for real names
 function approximateToASCII(domain) {

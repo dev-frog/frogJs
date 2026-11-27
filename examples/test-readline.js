@@ -6,8 +6,54 @@ const fs = require('fs');
 const readline = require('readline');
 const readlinePromises = require('readline/promises');
 const { PassThrough } = require('stream');
-const { spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const { check, rejects, throws, section, run, once } = require('./lib/check');
+
+// Run `code` in a child that script(1) gives a pseudo-terminal. Once `ready`
+// appears (the child is reading the terminal in raw mode), type each key with
+// a pause after it. Resolves with the output, or null if script(1) can't run.
+// Keys typed before the child is ready would go through the terminal's line
+// discipline instead, so this waits for `ready` rather than for a fixed time.
+function typeInTerminal(code, ready, keys) {
+  return new Promise((resolve, reject) => {
+    // script(1) needs a real pipe as its stdin, not the socket spawn() makes,
+    // so cat sits in between. Its own process group, so a timeout can end all
+    const child = spawn('sh', ['-c', 'cat | script -q /dev/null "$0" -e "$1"', process.execPath, code], { detached: true });
+    let output = '';
+    let typing = false;
+    const timer = setTimeout(() => {
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ }
+      reject(new Error(`the terminal child didn't finish; its output:\n${JSON.stringify(output)}`));
+    }, 20000);
+    const type = (i) => {
+      if (i === keys.length) return child.stdin.end();
+      child.stdin.write(keys[i]);
+      setTimeout(() => type(i + 1), 200);
+    };
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      output += chunk;
+      if (!typing && output.includes(ready)) {
+        typing = true;
+        type(0);
+      }
+    });
+    let errors = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => { errors += chunk; });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on('close', (status) => {
+      clearTimeout(timer);
+      // 127: sh found no script(1)
+      if (status === 127 && /script/.test(errors)) resolve(null);
+      else if (!typing) reject(new Error(`the terminal child ended before it was ready: ${JSON.stringify(output + errors)}`));
+      else resolve(output);
+    });
+  });
+}
 
 function collect(stream) {
   let text = '';
@@ -109,14 +155,11 @@ run(async () => {
       rl.prompt();
     });`;
   const keystrokes = ['abc\x7fd\x01X\x05Y\r', 'h', 'e', 'l', '\t', 'p', '\r', '\x04'];
-  // script(1) reads the keystrokes from its stdin; a shell feeds them slowly
-  const feeder = keystrokes.map((key) => `sleep 0.2; printf '${key.replace(/[\x00-\x1f\x7f]/g, (c) => '\\' + c.charCodeAt(0).toString(8).padStart(3, '0'))}'`).join('; ');
-  const result = spawnSync('sh', ['-c', `(sleep 0.5; ${feeder}) | script -q /dev/null "$0" -e "$1"`, process.execPath, script],
-    { encoding: 'utf8', timeout: 20000 });
-  if (result.error || !/CLOSED/.test(result.stdout || '')) {
+  const result = await typeInTerminal(script, 'Q? ', keystrokes);
+  if (result === null) {
     check('script(1) is not available: skipped', true, true);
   } else {
-    const events = result.stdout.replace(/\r/g, '').split('\n').map((text) => /(ANSWER|LINE|CLOSED).*/.exec(text)).filter(Boolean).map((match) => match[0]);
+    const events = result.replace(/\r/g, '').split('\n').map((text) => /(ANSWER|LINE|CLOSED).*/.exec(text)).filter(Boolean).map((match) => match[0]);
     check('editing, completion and Ctrl+D', events, ['ANSWER=[XabdY] true', 'LINE=[help]', 'CLOSED']);
   }
 });

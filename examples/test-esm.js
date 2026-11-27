@@ -95,6 +95,12 @@ run(async () => {
   write('commonjs/main.mjs', `import x from './x.js'; console.log(JSON.stringify(x));`);
   write('commonjs/x.js', 'module.exports = { from: "cjs" };');
   check('"type": "commonjs" with .mjs', json('commonjs/main.mjs'), { from: 'cjs' });
+  // require() reads "type" only for .js: a file without an extension is
+  // CommonJS (yargs's yargs/yargs), unless it only parses as a module
+  write('typed/bin-cjs', 'module.exports = { kind: typeof require };');
+  write('typed/bin-esm', 'export const kind = "esm";');
+  write('typed/load.cjs', `const a = require('./bin-cjs'); const b = require('./bin-esm'); console.log(JSON.stringify([a.kind, b.kind]));`);
+  check('require() of files without an extension in a "type": "module" package', json('typed/load.cjs'), ['function', 'esm']);
 
   section('Syntax detection');
   write('detect/main.js', `import { join } from 'path'; console.log(JSON.stringify(join('a', 'b')));`);
