@@ -639,7 +639,7 @@ struct EditorHolder {
 // Each method gets its holder as data; destroy() frees the editor, the
 // holder itself goes when the wrapper is collected
 EditorHolder* Holder(const FunctionCallbackInfo<Value>& args) {
-    auto* holder = frogjs::ExternalValue<EditorHolder>(args.Data());
+    auto* holder = frogjs::ExternalValue<EditorHolder>(frogjs::CallbackData(args));
     return holder != nullptr && holder->editor ? holder : nullptr;
 }
 
@@ -759,7 +759,7 @@ void Feed(const FunctionCallbackInfo<Value>& args) {
 }
 
 void Destroy(const FunctionCallbackInfo<Value>& args) {
-    auto* holder = frogjs::ExternalValue<EditorHolder>(args.Data());
+    auto* holder = frogjs::ExternalValue<EditorHolder>(frogjs::CallbackData(args));
     if (holder == nullptr) return;
     holder->editor.reset();
     holder->completer.Reset();

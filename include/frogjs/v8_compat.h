@@ -30,6 +30,18 @@ inline T* ExternalValue(v8::Local<v8::Value> value) {
     }
 }
 
+// The data a FunctionCallback was created with (Function::New's third
+// argument). V8 15.9 replaced Data() with DataV2(), which returns a v8::Data;
+// 15.8 has only Data(), already deprecated.
+template <typename Info>
+inline v8::Local<v8::Value> CallbackData(const Info& args) {
+    if constexpr (requires { args.DataV2(); }) {
+        return args.DataV2().template As<v8::Value>();
+    } else {
+        return args.Data();
+    }
+}
+
 // Copy a string's Latin-1 code units (each char must be <= 0xFF) into buffer,
 // which must hold str->Length() bytes. V8 15 renamed WriteOneByteV2 to
 // WriteOneByte; the old WriteOneByte signature in 13.x is deprecated.

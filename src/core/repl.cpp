@@ -2,6 +2,7 @@
 #include "frogjs/errors.h"
 #include "frogjs/line_editor.h"
 #include "frogjs/util.h"
+#include "frogjs/v8_compat.h"
 #include "frogjs/version.h"
 #include <v8.h>
 #include <uv.h>
@@ -522,7 +523,7 @@ void PrintUncaughtValue(Local<Context> context, Local<Value> exception) {
 void OnAwaitSettled(const FunctionCallbackInfo<Value>& args, bool fulfilled) {
     Isolate* isolate = args.GetIsolate();
     Local<Context> context = isolate->GetCurrentContext();
-    if (g_repl == nullptr || !g_repl->awaiting || args.Data()->Int32Value(context).FromMaybe(-1) != g_repl->await_id) return;
+    if (g_repl == nullptr || !g_repl->awaiting || frogjs::CallbackData(args)->Int32Value(context).FromMaybe(-1) != g_repl->await_id) return;
     g_repl->awaiting = false;
     if (fulfilled) {
         Local<Value> value = Undefined(isolate);
