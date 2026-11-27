@@ -131,14 +131,36 @@ console.log(JSON.stringify({ missing, undeclared }));
 })();
 `;
 
+// The globals the JavaScript language has. FrogJS's V8 can be newer than the
+// Node.js running this tool (CI: Homebrew's latest V8, Node.js 22), so Node.js's
+// own globals aren't enough: TypeScript's ES library (without the DOM) declares
+// new built-ins such as Float16Array and DisposableStack, usually before V8
+// ships them. Both are used, so a global counts as FrogJS's only if neither has it.
+function languageGlobals() {
+    const names = new Set(Object.getOwnPropertyNames(require('vm').runInNewContext('globalThis')));
+    // TypeScript loads its library only for a program with a file: an empty one
+    const empty = path.join(root, 'build', 'language-globals.ts');
+    const host = ts.createCompilerHost({});
+    const getSourceFile = host.getSourceFile;
+    host.getSourceFile = (name, ...rest) =>
+        (name === empty ? ts.createSourceFile(name, '', ts.ScriptTarget.ESNext) : getSourceFile.call(host, name, ...rest));
+    const program = ts.createProgram([empty], { noEmit: true, lib: ['lib.esnext.d.ts'], types: [] }, host);
+    const checker = program.getTypeChecker();
+    for (const symbol of checker.getSymbolsInScope(program.getSourceFile(empty), ts.SymbolFlags.Value)) {
+        const declarations = symbol.declarations || [];
+        if (declarations.length > 0 && declarations.every((d) => program.isSourceFileDefaultLibrary(d.getSourceFile()))) {
+            names.add(symbol.getName());
+        }
+    }
+    return [...names];
+}
+
 function main() {
     const declared = declarations();
     const moduleCount = Object.keys(declared.modules).length;
-    // The globals of plain V8, which the TypeScript library declares: each
-    // global FrogJS adds must be in types/
-    const language = JSON.parse(execFileSync(process.execPath,
-        ['-e', 'console.log(JSON.stringify(Object.getOwnPropertyNames(require("vm").runInNewContext("globalThis"))))'],
-        { encoding: 'utf8' }));
+    // Each global FrogJS adds must be in types/; the JavaScript language's own
+    // globals needn't be
+    const language = languageGlobals();
     let output;
     try {
         output = execFileSync(frogjs, ['-e', kRuntimeCheck, JSON.stringify(language), JSON.stringify(declared)], { encoding: 'utf8' });
