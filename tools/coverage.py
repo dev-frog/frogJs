@@ -21,9 +21,20 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS_BLOCK = re.compile(r'static const char\* (\w+) = R"JS\(|const char\* (\w+) = R"JS\(')
-TESTS = ['hello', 'test-buffer', 'test-path', 'test-os', 'test-modules', 'test-events', 'test-streams', 'test-util',
-         'test-http', 'test-crypto', 'test-child-process', 'test-worker-threads', 'test-fs', 'test-net', 'test-process',
-         'test-timers', 'test-module-loading', 'test-errors', 'test-http-limits', 'test-edges', 'test-memory']
+
+
+def makefile_tests():
+    """The self-tests `make test` runs: the TESTS variable of the Makefile, so that
+    coverage always runs the same tests (a copy here went stale once)"""
+    with open(os.path.join(ROOT, 'Makefile')) as makefile:
+        text = makefile.read().replace('\\\n', ' ')
+    match = re.search(r'^TESTS\s*=(.*)$', text, re.MULTILINE)
+    if not match:
+        sys.exit('coverage.py: no TESTS = ... line in the Makefile')
+    return match.group(1).split()
+
+
+TESTS = makefile_tests()
 
 
 def tool(name):

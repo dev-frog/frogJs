@@ -285,8 +285,14 @@ function approximateToASCII(domain) {
     if (/^\p{M}/u.test(label)) return null;
     if (label.startsWith('xn--')) {
       if (/[^\x00-\x7f]/.test(label)) return null;
+      // The decoded label must be one this function could have produced: not
+      // empty (UTS #46 rejects "xn--"), not all ASCII, normalized, and without
+      // controls or disallowed code points
       const decoded = punycode.decode(label.slice(4));
-      if (decoded === null || (decoded !== '' && /^[\x00-\x7f]*$/.test(decoded))) return null;
+      if (decoded === null || decoded === '' || /^[\x00-\x7f]*$/.test(decoded) || decoded.normalize('NFC') !== decoded ||
+          /[\x00-\x1f\x7f-\x9f]/.test(decoded) || idnaDisallowed.test(decoded) || /^\p{M}/u.test(decoded)) {
+        return null;
+      }
     } else if (/[^\x00-\x7f]/.test(label)) {
       const encoded = punycode.encode(label);
       if (encoded === null) return null;

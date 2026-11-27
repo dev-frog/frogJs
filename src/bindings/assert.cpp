@@ -43,13 +43,29 @@ function codeError(Base, code, message) {
   return err;
 }
 
+// How Node.js's errors describe a value they didn't expect
+function describeType(value) {
+  if (value === null || value === undefined) return String(value);
+  if (typeof value === 'function') return `function ${value.name}`;
+  if (typeof value === 'object') {
+    return value.constructor && value.constructor.name ? `an instance of ${value.constructor.name}` : inspect(value, { depth: -1 });
+  }
+  return `type ${typeof value} (${inspect(value)})`;
+}
+
 function invalidArgType(name, expected, value) {
-  let shown;
-  if (value === null || value === undefined) shown = String(value);
-  else if (typeof value === 'function') shown = `function ${value.name}`;
-  else if (typeof value === 'object') shown = value.constructor && value.constructor.name ? `an instance of ${value.constructor.name}` : inspect(value, { depth: -1 });
-  else shown = `type ${typeof value} (${inspect(value)})`;
-  return codeError(TypeError, 'ERR_INVALID_ARG_TYPE', `The "${name}" argument must be ${expected}. Received ${shown}`);
+  return codeError(TypeError, 'ERR_INVALID_ARG_TYPE', `The "${name}" argument must be ${expected}. Received ${describeType(value)}`);
+}
+
+// A copy of an error without its stack, so that messages show [Error: a]
+function copyError(source) {
+  const target = Object.assign(Object.create(Object.getPrototypeOf(source)), source);
+  Object.defineProperty(target, 'message', { value: source.message });
+  if (source.cause !== undefined) {
+    const cause = source.cause instanceof Error ? copyError(source.cause) : source.cause;
+    Object.defineProperty(target, 'cause', { value: cause });
+  }
+  return target;
 }
 
 // ---- The line diff ----
@@ -221,8 +237,16 @@ class AssertionError extends Error {
   constructor(options) {
     if (options === null || typeof options !== 'object') throw invalidArgType('options', 'of type object', options);
     const { message, operator, stackStartFn } = options;
-    const { actual, expected } = options;
-    if (message != null) {
+    let { actual, expected } = options;
+    // Errors are shown without their stacks, and kept as those copies (as in Node.js)
+    if (actual instanceof Error && 'stack' in actual && expected instanceof Error && 'stack' in expected) {
+      actual = copyError(actual);
+      expected = copyError(expected);
+    }
+    if (message != null && (operator === 'deepStrictEqual' || operator === 'strictEqual' || operator === 'partialDeepStrictEqual')) {
+      // As in Node.js 24, a message of one's own is followed by the diff
+      super(createErrDiff(actual, expected, operator, String(message)));
+    } else if (message != null) {
       super(String(message));
     } else if (operator === 'deepStrictEqual' || operator === 'strictEqual' || operator === 'partialDeepStrictEqual') {
       super(createErrDiff(actual, expected, operator));
@@ -666,7 +690,7 @@ async function waitForActual(promiseFn) {
     promise = promiseFn();
     if (!promise || typeof promise.then !== 'function') {
       throw codeError(TypeError, 'ERR_INVALID_RETURN_VALUE',
-        `Expected instance of Promise to be returned from the "promiseFn" function but got ${promise === undefined ? 'undefined' : `type ${typeof promise}`}.`);
+        `Expected instance of Promise to be returned from the "promiseFn" function but got ${describeType(promise)}.`);
     }
   } else if (promiseFn && typeof promiseFn.then === 'function') {
     promise = promiseFn;
@@ -814,16 +838,28 @@ function fail(actual, expected, message, operator, stackStartFn) {
   throw err;
 }
 
+// What calls() wraps without a function: nameless, as in Node.js ("the calls function")
+const kNoop = Function.prototype;
+
 // The deprecated call tracker: tracker.calls(fn, exact) wraps fn, and
 // verify() throws unless every wrapper was called exactly that often
+let warnedCallTracker = false;
+
 class CallTracker {
   #contexts = [];
   #byWrapper = new WeakMap();
 
-  calls(fn = () => {}, exact = 1) {
+  constructor() {
+    if (!warnedCallTracker) {
+      warnedCallTracker = true;
+      process.emitWarning('assert.CallTracker is deprecated.', 'DeprecationWarning', 'DEP0173');
+    }
+  }
+
+  calls(fn = kNoop, exact = 1) {
     if (typeof fn === 'number') {
       exact = fn;
-      fn = () => {};
+      fn = kNoop;
     }
     if (typeof fn !== 'function') throw invalidArgType('fn', 'of type function', fn);
     const context = { exact, actual: 0, name: fn.name || 'calls', stackTrace: new Error(), calls: [] };
