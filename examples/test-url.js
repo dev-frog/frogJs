@@ -3,6 +3,7 @@
 const url = require('url');
 const qs = require('querystring');
 const util = require('util');
+const { spawnSync } = require('child_process');
 const { check, throws, section, run } = require('./lib/check');
 
 const href = (input, base) => new URL(input, base).href;
@@ -174,4 +175,24 @@ run(() => {
   check('stringify with separators', qs.stringify({ w: 'x', y: 'z' }, ';', ':'), 'w:x;y:z');
   check('escape and unescape', [qs.escape('a b&c'), qs.unescape('%E2%82%ACx%')], ['a%20b%26c', '€x%']);
   check('decode and encode are aliases', [qs.decode, qs.encode], [qs.parse, qs.stringify]);
+
+  section('International domain names');
+  // [domainToASCII, domainToUnicode, the hostname of http://<domain>/]
+  const kDomains = ['münchen.de', 'MÜNCHEN.DE', 'xn--mnchen-3ya.de', 'example.com', 'bücher.example', 'ﬁ.com', 'a­b.com',
+    'σ.com', 'Σ.com', '日本語.jp', 'xn--wgv71a119e.jp', 'faß.de', 'xn--a.com', 'xn--abc-.com', 'a。b．c｡d', '́a.com',
+    'xn--ls8h.la', '💩.la', 'a​b.com', 'xn--zca.com', 'xn--1ch.com', 'é.xn--x', 'xn--', 'ab--c.com'];
+  const kDomainsScript = `
+    const url = require('url');
+    const domains = ${JSON.stringify(kDomains)};
+    console.log(JSON.stringify(domains.map((d) => [url.domainToASCII(d), url.domainToUnicode(d),
+      (() => { try { return new URL('http://' + d + '/').hostname; } catch (e) { return e.code; } })()])));`;
+  const kDomainsExpected = [["xn--mnchen-3ya.de","münchen.de","xn--mnchen-3ya.de"],["xn--mnchen-3ya.de","münchen.de","xn--mnchen-3ya.de"],["xn--mnchen-3ya.de","münchen.de","xn--mnchen-3ya.de"],["example.com","example.com","example.com"],["xn--bcher-kva.example","bücher.example","xn--bcher-kva.example"],["fi.com","fi.com","fi.com"],["ab.com","ab.com","ab.com"],["xn--4xa.com","σ.com","xn--4xa.com"],["xn--4xa.com","σ.com","xn--4xa.com"],["xn--wgv71a119e.jp","日本語.jp","xn--wgv71a119e.jp"],["xn--wgv71a119e.jp","日本語.jp","xn--wgv71a119e.jp"],["xn--fa-hia.de","faß.de","xn--fa-hia.de"],["","","ERR_INVALID_URL"],["","","ERR_INVALID_URL"],["a.b.c.d","a.b.c.d","a.b.c.d"],["","","ERR_INVALID_URL"],["xn--ls8h.la","💩.la","xn--ls8h.la"],["xn--ls8h.la","💩.la","xn--ls8h.la"],["ab.com","ab.com","ab.com"],["xn--zca.com","ß.com","xn--zca.com"],["xn--1ch.com","≠.com","xn--1ch.com"],["","","ERR_INVALID_URL"],["","","ERR_INVALID_URL"],["ab--c.com","ab--c.com","ab--c.com"]];
+  const inProcess = JSON.parse(spawnSync(process.execPath, ['-e', kDomainsScript], { encoding: 'utf8' }).stdout);
+  check('domainToASCII, domainToUnicode and hosts', inProcess, kDomainsExpected);
+  if (process.versions.frogjs) {
+    // Without ICU's IDNA, FrogJS uses its own Punycode and an approximation of
+    // UTS #46: it must agree on these
+    const fallback = spawnSync(process.execPath, ['-e', kDomainsScript], { encoding: 'utf8', env: { ...process.env, FROGJS_NO_ICU_IDNA: '1' } });
+    check('the same without ICU', JSON.parse(fallback.stdout), kDomainsExpected);
+  }
 });
