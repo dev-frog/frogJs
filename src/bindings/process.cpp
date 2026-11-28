@@ -452,6 +452,8 @@ Local<Array> CreateStringArray(Isolate* isolate, const std::vector<std::string>&
 Local<Object> CreateVersionsObject(Isolate* isolate) {
     Local<Context> context = isolate->GetCurrentContext();
     Local<Object> versions = Object::New(isolate);
+    versions->Set(context, String::NewFromUtf8Literal(isolate, "node"),
+        String::NewFromUtf8(isolate, FROGJS_NODE_VERSION).ToLocalChecked()).Check();
     versions->Set(context, String::NewFromUtf8Literal(isolate, "frogjs"),
         String::NewFromUtf8(isolate, FROGJS_VERSION).ToLocalChecked()).Check();
     versions->Set(context, String::NewFromUtf8Literal(isolate, "v8"),
@@ -582,7 +584,7 @@ void SetupProcess(Isolate* isolate, Local<Context> context, const std::vector<st
     set(String::NewFromUtf8Literal(isolate, "pid"), Integer::New(isolate, getpid()));
     set(String::NewFromUtf8Literal(isolate, "ppid"), Integer::New(isolate, getppid()));
     set(String::NewFromUtf8Literal(isolate, "platform"), String::NewFromUtf8(isolate, PlatformName()).ToLocalChecked());
-    set(String::NewFromUtf8Literal(isolate, "version"), String::NewFromUtf8(isolate, "v" FROGJS_VERSION).ToLocalChecked());
+    set(String::NewFromUtf8Literal(isolate, "version"), String::NewFromUtf8(isolate, "v" FROGJS_NODE_VERSION).ToLocalChecked());
     set(String::NewFromUtf8Literal(isolate, "versions"), CreateVersionsObject(isolate));
 
     tls_process.Reset(isolate, process);

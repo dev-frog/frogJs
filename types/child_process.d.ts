@@ -33,6 +33,8 @@ declare module 'child_process' {
         gid?: number;
         /** Ignored (Windows only in Node.js). */
         windowsHide?: boolean;
+        /** Aborting kills the child with `killSignal` and reports an AbortError (not for the Sync functions). */
+        signal?: AbortSignal;
     }
 
     interface URLLike {

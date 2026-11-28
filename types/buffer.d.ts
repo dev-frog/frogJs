@@ -118,5 +118,7 @@ type FrogJSBufferClass = typeof Buffer;
 
 declare module 'buffer' {
     const Buffer: FrogJSBufferClass;
-    export { Buffer };
+    const atob: typeof globalThis.atob;
+    const btoa: typeof globalThis.btoa;
+    export { Buffer, atob, btoa };
 }

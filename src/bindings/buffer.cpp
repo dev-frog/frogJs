@@ -621,6 +621,8 @@ static void Write(const FunctionCallbackInfo<Value>& args) {
         // Back up over continuation bytes to the start of the cut character
         while (count > 0 && (static_cast<unsigned char>(bytes[count]) & 0xC0) == 0x80) count--;
     }
+    // Whole UTF-16 code units only
+    if (encoding == frogjs::Encoding::kUtf16le) count &= ~static_cast<size_t>(1);
     if (count > 0) memcpy(buffer.data + offset, bytes.data(), count);
     args.GetReturnValue().Set(static_cast<double>(count));
 }

@@ -1,3 +1,4 @@
+#include <uv.h>
 #include <v8.h>
 #include <string>
 #include <vector>
@@ -25,13 +26,31 @@ const inspectDefaults = {
   breakLength: 80,
   compact: 3,
   sorted: false,
+  getters: false,
 };
 
+// Node.js's table: SGR codes to turn each style on and off
 const colorCodes = {
-  bold: [1, 22], italic: [3, 23], underline: [4, 24], inverse: [7, 27],
-  white: [37, 39], grey: [90, 39], black: [30, 39], blue: [34, 39],
-  cyan: [36, 39], green: [32, 39], magenta: [35, 39], red: [31, 39], yellow: [33, 39],
+  reset: [0, 0], bold: [1, 22], dim: [2, 22], italic: [3, 23], underline: [4, 24], blink: [5, 25], inverse: [7, 27],
+  hidden: [8, 28], strikethrough: [9, 29], doubleunderline: [21, 24],
+  black: [30, 39], red: [31, 39], green: [32, 39], yellow: [33, 39], blue: [34, 39], magenta: [35, 39], cyan: [36, 39], white: [37, 39],
+  bgBlack: [40, 49], bgRed: [41, 49], bgGreen: [42, 49], bgYellow: [43, 49], bgBlue: [44, 49], bgMagenta: [45, 49], bgCyan: [46, 49], bgWhite: [47, 49],
+  framed: [51, 54], overlined: [53, 55], gray: [90, 39], redBright: [91, 39], greenBright: [92, 39], yellowBright: [93, 39],
+  blueBright: [94, 39], magentaBright: [95, 39], cyanBright: [96, 39], whiteBright: [97, 39],
+  bgGray: [100, 49], bgRedBright: [101, 49], bgGreenBright: [102, 49], bgYellowBright: [103, 49], bgBlueBright: [104, 49],
+  bgMagentaBright: [105, 49], bgCyanBright: [106, 49], bgWhiteBright: [107, 49],
 };
+// Other names for some of them, not enumerable (as in Node.js)
+for (const [alias, name] of [['grey', 'gray'], ['blackBright', 'gray'], ['bgGrey', 'bgGray'], ['bgBlackBright', 'bgGray'], ['faint', 'dim'],
+                             ['crossedout', 'strikethrough'], ['strikeThrough', 'strikethrough'], ['crossedOut', 'strikethrough'],
+                             ['conceal', 'hidden'], ['swapColors', 'inverse'], ['swapcolors', 'inverse'], ['doubleUnderline', 'doubleunderline']]) {
+  Object.defineProperty(colorCodes, alias, {
+    get() { return this[name]; },
+    set(value) { this[name] = value; },
+    configurable: true,
+    enumerable: false,
+  });
+}
 
 const styles = {
   special: 'cyan', number: 'yellow', bigint: 'yellow', boolean: 'yellow',
@@ -43,8 +62,12 @@ const kObjectType = 0;
 const kArrayType = 1;
 const kArrayExtrasType = 2;
 
-// eslint-disable-next-line no-control-regex
-const ansiPattern = /\u001b\[\d\d?m/g;
+// ANSI escape sequences: colors, cursor movement, OSC (as Node.js matches them)
+const ansiPattern = new RegExp('[\\u001B\\u009B][[\\]()#;?]*' +
+  '(?:(?:(?:(?:;[-a-zA-Z\\d\\/\\#&.:=?%@~_]+)*' +
+  '|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/\\#&.:=?%@~_]*)*)?' +
+  '(?:\\u0007|\\u001B\\u005C|\\u009C))' +
+  '|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))', 'g');
 const keyIdentifier = /^[a-zA-Z_][a-zA-Z_0-9]*$/;
 
 function removeColors(str) {
@@ -252,6 +275,31 @@ function getFunctionBase(value, constructor, tag) {
   return base;
 }
 
+// Name the class in the first line when it isn't there: "MyError: x" for a
+// subclass, "DOMException [AbortError]: x" when the name differs (as Node.js)
+function improveStack(stack, constructor, name, tag) {
+  let len = name.length;
+  if (constructor === null ||
+      (name.endsWith('Error') && stack.startsWith(name) && (stack.length === len || stack[len] === ':' || stack[len] === '\n'))) {
+    let fallback = 'Error';
+    if (constructor === null) {
+      const start = /^([A-Z][a-z_ A-Z0-9[\]()-]+)(?::|\n\s+at)/.exec(stack) || /^([a-z_A-Z0-9-]*Error)$/.exec(stack);
+      fallback = (start && start[1]) || '';
+      len = fallback.length;
+      fallback = fallback || 'Error';
+    }
+    const prefix = getPrefix(constructor, tag, fallback).slice(0, -1);
+    if (name !== prefix) {
+      if (prefix.includes(name)) {
+        stack = len === 0 ? `${prefix}: ${stack}` : `${prefix}${stack.slice(len)}`;
+      } else {
+        stack = `${prefix} [${name}]${stack.slice(len)}`;
+      }
+    }
+  }
+  return stack;
+}
+
 function formatError(err, constructor, tag, ctx, keys) {
   let stack;
   try {
@@ -261,18 +309,18 @@ function formatError(err, constructor, tag, ctx, keys) {
   }
   const name = err.name != null ? String(err.name) : 'Error';
   const message = err.message != null ? String(err.message) : '';
+  let bracketed = false;
   if (typeof stack !== 'string' || stack === '') {
     stack = message ? `${name}: ${message}` : name;
-    stack = `[${stack}]`;
+    bracketed = true;
   }
   // Own enumerable name/message are already part of the stack
   for (const key of ['name', 'message', 'stack']) {
     const index = keys.indexOf(key);
     if (index !== -1 && typeof err[key] === 'string' && stack.includes(err[key])) keys.splice(index, 1);
   }
-  if (constructor === null) {
-    stack = `[${name}: null prototype] ${stack}`;
-  }
+  stack = improveStack(stack, constructor, name, tag);
+  if (bracketed) stack = `[${stack}]`;
   if (ctx.indentationLvl !== 0) {
     const indentation = ' '.repeat(ctx.indentationLvl);
     stack = stack.replace(/\n/g, `\n${indentation}`);
@@ -344,7 +392,23 @@ function formatRaw(ctx, value, recurseTimes, typedArray) {
   if (noIterator) {
     keys = getKeys(value, ctx.showHidden);
     braces = ['{', '}'];
-    if (typeof value === 'function') {
+    if (native.isModuleNamespace(value)) {
+      // An ES module's namespace: values, and <uninitialized> for bindings
+      // that haven't been evaluated yet
+      braces[0] = `${getPrefix(constructor, tag, 'Module')}{`;
+      // Object.keys() would throw for an uninitialized binding
+      const names = Reflect.ownKeys(value).filter((key) => typeof key === 'string');
+      keys = [];
+      formatter = (innerCtx, namespace, innerRecurse) => names.map((key) => {
+        try {
+          return formatProperty(innerCtx, namespace, innerRecurse, key, kObjectType);
+        } catch (err) {
+          if (!(err instanceof ReferenceError)) throw err;
+          return `${key}: ${innerCtx.stylize('<uninitialized>', 'special')}`;
+        }
+      });
+      if (names.length === 0) return `${braces[0]}}`;
+    } else if (typeof value === 'function') {
       base = getFunctionBase(value, constructor, tag);
       if (keys.length === 0) return ctx.stylize(base, 'special');
     } else if (constructor === 'Object' && !isError(value) && !(value instanceof Date) &&
@@ -697,7 +761,24 @@ function formatProperty(ctx, value, recurseTimes, key, type) {
     }
     ctx.indentationLvl -= diff;
   } else if (desc.get !== undefined) {
-    str = ctx.stylize(desc.set !== undefined ? '[Getter/Setter]' : '[Getter]', 'special');
+    const label = desc.set !== undefined ? 'Getter/Setter' : 'Getter';
+    const s = ctx.stylize;
+    if (ctx.getters && (ctx.getters === true || (ctx.getters === 'get' && desc.set === undefined) ||
+                        (ctx.getters === 'set' && desc.set !== undefined))) {
+      // getters: run the getter and show what it returns
+      try {
+        const result = desc.get.call(value);
+        ctx.indentationLvl += 2;
+        if (result === null) str = `${s(`[${label}:`, 'special')} ${s('null', 'null')}${s(']', 'special')}`;
+        else if (typeof result === 'object') str = `${s(`[${label}]`, 'special')} ${formatValue(ctx, result, recurseTimes)}`;
+        else str = `${s(`[${label}:`, 'special')} ${formatPrimitive(s, result, ctx)}${s(']', 'special')}`;
+        ctx.indentationLvl -= 2;
+      } catch (err) {
+        str = `${s(`[${label}:`, 'special')} <Inspection threw (${err && err.message})>${s(']', 'special')}`;
+      }
+    } else {
+      str = s(`[${label}]`, 'special');
+    }
   } else if (desc.set !== undefined) {
     str = ctx.stylize('[Setter]', 'special');
   } else {
@@ -947,14 +1028,127 @@ function tryStringify(arg) {
   }
 }
 
+// Node.js's strict deep equality: same prototype and [[Class]], primitives
+// with Object.is, own enumerable string and symbol keys, and the contents of
+// Dates, RegExps, boxed primitives, Errors, typed arrays, Maps and Sets
 function isDeepStrictEqual(a, b) {
-  if (Object.is(a, b)) return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  return deepStrict(a, b, null);
+}
+
+const objectToString = (value) => Object.prototype.toString.call(value);
+
+function deepStrict(a, b, memo) {
+  if (a === b) return a !== 0 || Object.is(a, b);
+  if (typeof a !== 'object' || a === null) return typeof b !== 'object' && Object.is(a, b);
+  if (typeof b !== 'object' || b === null) return false;
   if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
-  const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
+  const tag = objectToString(a);
+  if (tag !== objectToString(b)) return false;
+
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+  } else if (tag === '[object Object]' || tag === '[object Arguments]') {
+    // compared by keys below
+  } else if (a instanceof Date) {
+    if (!Object.is(a.getTime(), b.getTime())) return false;
+  } else if (a instanceof RegExp) {
+    if (a.source !== b.source || a.flags !== b.flags || a.lastIndex !== b.lastIndex) return false;
+  } else if (native.isBoxedPrimitive(a)) {
+    if (!native.isBoxedPrimitive(b) || !Object.is(a.valueOf(), b.valueOf())) return false;
+  } else if (a instanceof Error) {
+    if (a.message !== b.message || a.name !== b.name) return false;
+    if (('cause' in a) !== ('cause' in b) || !deepStrict(a.cause, b.cause, memo)) return false;
+    if (('errors' in a) !== ('errors' in b) || !deepStrict(a.errors, b.errors, memo)) return false;
+  } else if (ArrayBuffer.isView(a)) {
+    if (a.byteLength !== b.byteLength) return false;
+    const bytesA = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
+    const bytesB = new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
+    if (a instanceof Float32Array || a instanceof Float64Array) {
+      for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false;
+    } else {
+      for (let i = 0; i < bytesA.length; i++) if (bytesA[i] !== bytesB[i]) return false;
+    }
+  } else if (a instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && a instanceof SharedArrayBuffer)) {
+    if (a.byteLength !== b.byteLength) return false;
+    const bytesA = new Uint8Array(a);
+    const bytesB = new Uint8Array(b);
+    for (let i = 0; i < bytesA.length; i++) if (bytesA[i] !== bytesB[i]) return false;
+  } else if (a instanceof WeakMap || a instanceof WeakSet || a instanceof Promise || a instanceof WeakRef) {
+    return false;
+  }
+
+  // Cycles: a pair already being compared counts as equal
+  if (memo === null) memo = { a: new Map(), b: new Map(), position: 0 };
+  const seenA = memo.a.get(a);
+  if (seenA !== undefined) {
+    const seenB = memo.b.get(b);
+    if (seenB !== undefined) return seenA === seenB;
+  }
+  memo.position++;
+  memo.a.set(a, memo.position);
+  memo.b.set(b, memo.position);
+  const result = compareContents(a, b, memo);
+  memo.a.delete(a);
+  memo.b.delete(b);
+  return result;
+}
+
+function ownEnumerableKeys(value) {
+  const keys = Object.keys(value);
+  for (const symbol of Object.getOwnPropertySymbols(value)) {
+    if (Object.prototype.propertyIsEnumerable.call(value, symbol)) keys.push(symbol);
+  }
+  return keys;
+}
+
+function compareContents(a, b, memo) {
+  const keysA = ownEnumerableKeys(a);
+  const keysB = ownEnumerableKeys(b);
   if (keysA.length !== keysB.length) return false;
-  return keysA.every((key) => Object.prototype.hasOwnProperty.call(b, key) && isDeepStrictEqual(a[key], b[key]));
+  for (const key of keysA) {
+    if (!Object.prototype.propertyIsEnumerable.call(b, key)) return false;
+  }
+  if (a instanceof Map) {
+    if (a.size !== b.size) return false;
+    const pending = [];
+    for (const [key, value] of a) {
+      if (typeof key === 'object' && key !== null) {
+        pending.push([key, value]);
+      } else if (!b.has(key) || !deepStrict(value, b.get(key), memo)) {
+        // a primitive key that b doesn't have can only match an equal object key: it can't
+        return false;
+      }
+    }
+    if (pending.length > 0) {
+      const candidates = [];
+      for (const [key, value] of b) if (typeof key === 'object' && key !== null) candidates.push([key, value]);
+      for (const [key, value] of pending) {
+        const index = candidates.findIndex(([otherKey, otherValue]) => deepStrict(key, otherKey, memo) && deepStrict(value, otherValue, memo));
+        if (index < 0) return false;
+        candidates.splice(index, 1);
+      }
+    }
+  } else if (a instanceof Set) {
+    if (a.size !== b.size) return false;
+    const pending = [];
+    for (const value of a) {
+      if (typeof value === 'object' && value !== null) pending.push(value);
+      else if (!b.has(value)) return false;
+    }
+    if (pending.length > 0) {
+      const candidates = [];
+      for (const value of b) if (typeof value === 'object' && value !== null) candidates.push(value);
+      for (const value of pending) {
+        const index = candidates.findIndex((other) => deepStrict(value, other, memo));
+        if (index < 0) return false;
+        candidates.splice(index, 1);
+      }
+    }
+  }
+  for (const key of keysA) {
+    if (!deepStrict(a[key], b[key], memo)) return false;
+  }
+  return true;
 }
 
 function inherits(ctor, superCtor) {
@@ -980,14 +1174,420 @@ function promisify(original) {
 }
 promisify.custom = kCustomPromisify;
 
+function utilError(Base, code, message) {
+  const err = new Base(message);
+  err.code = code;
+  return err;
+}
+
+function describeValue(value) {
+  if (value === null || value === undefined) return String(value);
+  if (typeof value === 'function') return `function ${value.name}`;
+  if (typeof value === 'object') return value.constructor && value.constructor.name ? `an instance of ${value.constructor.name}` : inspect(value, { depth: -1 });
+  return `type ${typeof value} (${inspect(value)})`;
+}
+
+function argType(name, expected, value) {
+  return utilError(TypeError, 'ERR_INVALID_ARG_TYPE', `The "${name}" argument must be ${expected}. Received ${describeValue(value)}`);
+}
+
+// ---- deprecate, debuglog, callbackify ----
+
+const deprecatedCodes = new Set();
+
+// A wrapper that emits a DeprecationWarning the first time it is called (once
+// per code), unless --no-deprecation; --throw-deprecation makes it throw
+function deprecate(fn, msg, code) {
+  if (typeof fn !== 'function') throw argType('fn', 'of type function', fn);
+  if (code !== undefined && typeof code !== 'string') throw argType('code', 'of type string', code);
+  // util itself deprecates functions before process exists
+  if (typeof process !== 'undefined' && process.noDeprecation === true) return fn;
+  let warned = false;
+  function deprecated(...args) {
+    if (!warned && !process.noDeprecation) {
+      warned = true;
+      if (code === undefined || !deprecatedCodes.has(code)) {
+        if (code !== undefined) deprecatedCodes.add(code);
+        process.emitWarning(msg, 'DeprecationWarning', code, deprecated);
+      }
+    }
+    if (new.target) return Reflect.construct(fn, args, new.target);
+    return Reflect.apply(fn, this, args);
+  }
+  Object.setPrototypeOf(deprecated, fn);
+  if (fn.prototype) deprecated.prototype = fn.prototype;
+  return deprecated;
+}
+
+// NODE_DEBUG=a,b,c* turns sections on; FROGJS_DEBUG works too
+let debugPattern;
+function debugEnabled(section) {
+  if (debugPattern === undefined) {
+    const value = (process.env.NODE_DEBUG || process.env.FROGJS_DEBUG || '').trim();
+    debugPattern = value === '' ? null : new RegExp(`^(${value.split(/[\s,]+/).filter(Boolean)
+      .map((part) => part.replace(/[|\\{}()[\]^$+?.]/g, '\\$&').replace(/\*/g, '.*')).join('|')})$`, 'i');
+  }
+  return debugPattern !== null && debugPattern.test(section);
+}
+
+function debuglog(section, callback) {
+  section = String(section);
+  let enabled;
+  let logger;
+  const init = () => {
+    if (logger !== undefined) return;
+    enabled = debugEnabled(section);
+    const prefix = `${section.toUpperCase()} ${process.pid}:`;
+    logger = enabled ? (...args) => process.stderr.write(`${prefix} ${format(...args)}\n`) : () => {};
+    if (typeof callback === 'function') callback(logger);
+  };
+  const debug = (...args) => {
+    init();
+    logger(...args);
+  };
+  Object.defineProperty(debug, 'enabled', { get() { init(); return enabled; }, configurable: true, enumerable: true });
+  return debug;
+}
+
+function callbackify(original) {
+  if (typeof original !== 'function') throw argType('original', 'of type function', original);
+  function callbackified(...args) {
+    const callback = args.pop();
+    if (typeof callback !== 'function') throw argType('last argument', 'of type function', callback);
+    const onResult = (value) => process.nextTick(callback, null, value);
+    const onError = (reason) => {
+      if (!reason) {
+        const err = utilError(Error, 'ERR_FALSY_VALUE_REJECTION', 'Promise was rejected with falsy value');
+        err.reason = reason;
+        reason = err;
+      }
+      process.nextTick(callback, reason);
+    };
+    Reflect.apply(original, this, args).then(onResult, onError);
+  }
+  Object.defineProperties(callbackified, Object.getOwnPropertyDescriptors(original));
+  Object.setPrototypeOf(callbackified, Object.getPrototypeOf(original));
+  return callbackified;
+}
+
+// ---- styleText ----
+
+function shouldColorize(stream) {
+  if (process.env.FORCE_COLOR !== undefined) {
+    return !['0', 'false'].includes(process.env.FORCE_COLOR);
+  }
+  if (!stream || !stream.isTTY) return false;
+  if (typeof stream.getColorDepth === 'function') return stream.getColorDepth() > 2;
+  return process.env.NO_COLOR === undefined && process.env.NODE_DISABLE_COLORS === undefined && process.env.TERM !== 'dumb';
+}
+
+// styleText(format, text[, { validateStream, stream }]): text in the styles
+// of inspect.colors, if the stream shows colors (or validateStream is false)
+function styleText(format, text, { validateStream = true, stream = process.stdout } = {}) {
+  if (typeof text !== 'string') throw argType('text', 'of type string', text);
+  if (typeof validateStream !== 'boolean') throw argType('options.validateStream', 'of type boolean', validateStream);
+  let skip = false;
+  if (validateStream) {
+    if (stream === null || typeof stream !== 'object' || (typeof stream.write !== 'function' && typeof stream.on !== 'function')) {
+      throw argType('stream', 'an instance of ReadableStream, WritableStream, or Stream', stream);
+    }
+    skip = !shouldColorize(stream);
+  }
+  let left = '';
+  let right = '';
+  for (const key of Array.isArray(format) ? format : [format]) {
+    if (key === 'none') continue;
+    const codes = colorCodes[key];
+    if (codes == null) {
+      const allowed = Object.keys(colorCodes).map((name) => `'${name}'`).join(', ');
+      throw utilError(TypeError, 'ERR_INVALID_ARG_VALUE', `The argument 'format' must be one of: ${allowed}. Received ${inspect(key)}`);
+    }
+    if (skip) continue;
+    left += `\u001b[${codes[0]}m`;
+    right = `\u001b[${codes[1]}m${right}`;
+  }
+  return skip ? text : `${left}${text}${right}`;
+}
+
+// ---- parseArgs: a port of Node.js's lib/internal/util/parse_args ----
+
+function parseArgsError(code, message) {
+  return utilError(TypeError, code, message);
+}
+
+const optionsGetOwn = (options, longOption, key) =>
+  Object.prototype.hasOwnProperty.call(options, longOption) && options[longOption] !== null && typeof options[longOption] === 'object' ?
+    (Object.prototype.hasOwnProperty.call(options[longOption], key) ? options[longOption][key] : undefined) : undefined;
+
+function findLongOptionForShort(shortOption, options) {
+  const found = Object.keys(options).find((longOption) => optionsGetOwn(options, longOption, 'short') === shortOption);
+  return found === undefined ? shortOption : found;
+}
+
+const isOptionValue = (value) => value != null;
+const isOptionLikeValue = (value) => value != null && value.length > 1 && value[0] === '-';
+const isLoneShortOption = (arg) => arg.length === 2 && arg[0] === '-' && arg[1] !== '-';
+const isLoneLongOption = (arg) => arg.length > 2 && arg.startsWith('--') && !arg.includes('=', 3);
+const isLongOptionAndValue = (arg) => arg.length > 2 && arg.startsWith('--') && arg.includes('=', 3);
+
+function isShortOptionGroup(arg, options) {
+  if (arg.length <= 2 || arg[0] !== '-' || arg[1] === '-') return false;
+  return optionsGetOwn(options, findLongOptionForShort(arg[1], options), 'type') !== 'string';
+}
+
+function isShortOptionAndValue(arg, options) {
+  if (arg.length <= 2 || arg[0] !== '-' || arg[1] === '-') return false;
+  return optionsGetOwn(options, findLongOptionForShort(arg[1], options), 'type') === 'string';
+}
+
+function argsToTokens(args, options) {
+  const tokens = [];
+  let index = -1;
+  let groupCount = 0;
+  const remaining = args.slice();
+  while (remaining.length > 0) {
+    const arg = remaining.shift();
+    const nextArg = remaining[0];
+    if (groupCount > 0) groupCount--;
+    else index++;
+
+    if (arg === '--') {
+      tokens.push({ kind: 'option-terminator', index });
+      for (const positional of remaining) tokens.push({ kind: 'positional', index: ++index, value: positional });
+      break;
+    }
+    if (isLoneShortOption(arg)) {
+      const longOption = findLongOptionForShort(arg[1], options);
+      let value;
+      let inlineValue;
+      if (optionsGetOwn(options, longOption, 'type') === 'string' && isOptionValue(nextArg)) {
+        value = remaining.shift();
+        inlineValue = false;
+      }
+      tokens.push({ kind: 'option', name: longOption, rawName: arg, index, value, inlineValue });
+      if (value != null) ++index;
+      continue;
+    }
+    if (isShortOptionGroup(arg, options)) {
+      // -abc is -a -b -c; a string option takes the rest: -abfFILE is -a -b -fFILE
+      const expanded = [];
+      for (let i = 1; i < arg.length; i++) {
+        const shortOption = arg[i];
+        const longOption = findLongOptionForShort(shortOption, options);
+        if (optionsGetOwn(options, longOption, 'type') !== 'string' || i === arg.length - 1) {
+          expanded.push(`-${shortOption}`);
+        } else {
+          expanded.push(`-${arg.slice(i)}`);
+          break;
+        }
+      }
+      remaining.unshift(...expanded);
+      groupCount = expanded.length;
+      continue;
+    }
+    if (isShortOptionAndValue(arg, options)) {
+      const shortOption = arg[1];
+      tokens.push({ kind: 'option', name: findLongOptionForShort(shortOption, options), rawName: `-${shortOption}`, index, value: arg.slice(2), inlineValue: true });
+      continue;
+    }
+    if (isLoneLongOption(arg)) {
+      const longOption = arg.slice(2);
+      let value;
+      let inlineValue;
+      if (optionsGetOwn(options, longOption, 'type') === 'string' && isOptionValue(nextArg)) {
+        value = remaining.shift();
+        inlineValue = false;
+      }
+      tokens.push({ kind: 'option', name: longOption, rawName: arg, index, value, inlineValue });
+      if (value != null) ++index;
+      continue;
+    }
+    if (isLongOptionAndValue(arg)) {
+      const equals = arg.indexOf('=');
+      const longOption = arg.slice(2, equals);
+      tokens.push({ kind: 'option', name: longOption, rawName: `--${longOption}`, index, value: arg.slice(equals + 1), inlineValue: true });
+      continue;
+    }
+    tokens.push({ kind: 'positional', index, value: arg });
+  }
+  return tokens;
+}
+
+function unknownOption(rawName, allowPositionals) {
+  const suggestion = allowPositionals ?
+    `. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- ${JSON.stringify(rawName)}` : '';
+  return parseArgsError('ERR_PARSE_ARGS_UNKNOWN_OPTION', `Unknown option '${rawName}'${suggestion}`);
+}
+
+function checkOptionUsage(config, token) {
+  let name = token.name;
+  if (!Object.prototype.hasOwnProperty.call(config.options, name)) {
+    if (config.allowNegative && name.startsWith('no-')) {
+      name = name.slice(3);
+      if (!Object.prototype.hasOwnProperty.call(config.options, name) || optionsGetOwn(config.options, name, 'type') !== 'boolean') {
+        throw unknownOption(token.rawName, config.allowPositionals);
+      }
+    } else {
+      throw unknownOption(token.rawName, config.allowPositionals);
+    }
+  }
+  const short = optionsGetOwn(config.options, name, 'short');
+  const shortAndLong = `${short ? `-${short}, ` : ''}--${name}`;
+  const type = optionsGetOwn(config.options, name, 'type');
+  if (type === 'string' && typeof token.value !== 'string') {
+    throw parseArgsError('ERR_PARSE_ARGS_INVALID_OPTION_VALUE', `Option '${shortAndLong} <value>' argument missing`);
+  }
+  if (type === 'boolean' && token.value != null) {
+    throw parseArgsError('ERR_PARSE_ARGS_INVALID_OPTION_VALUE', `Option '${shortAndLong}' does not take an argument`);
+  }
+}
+
+function checkOptionLikeValue(token) {
+  if (!token.inlineValue && isOptionLikeValue(token.value)) {
+    const example = token.rawName.startsWith('--') ? `'${token.rawName}=-XYZ'` : `'--${token.name}=-XYZ' or '${token.rawName}-XYZ'`;
+    throw parseArgsError('ERR_PARSE_ARGS_INVALID_OPTION_VALUE',
+      `Option '${token.rawName}' argument is ambiguous.\nDid you forget to specify the option argument for '${token.rawName}'?\n` +
+      `To specify an option argument starting with a dash use ${example}.`);
+  }
+}
+
+function storeOption(longOption, optionValue, options, values, allowNegative) {
+  let value = optionValue == null ? true : optionValue;
+  if (allowNegative && longOption.startsWith('no-')) {
+    const positive = longOption.slice(3);
+    if (optionsGetOwn(options, positive, 'type') !== 'string') {
+      longOption = positive;
+      value = false;
+    }
+  }
+  if (longOption === '__proto__') return;
+  if (optionsGetOwn(options, longOption, 'multiple')) {
+    if (values[longOption] === undefined) values[longOption] = [];
+    values[longOption].push(value);
+  } else {
+    values[longOption] = value;
+  }
+}
+
+// The arguments after the script, or after the executable for --eval code
+function mainArgs() {
+  const evalOptions = ['-e', '--eval', '-p', '--print', '-pe', '-ep'];
+  const execArgv = process.execArgv || [];
+  if (execArgv.some((arg) => evalOptions.includes(arg) || arg.startsWith('--eval=') || arg.startsWith('--print='))) return process.argv.slice(1);
+  return process.argv.slice(2);
+}
+
+function parseArgs(config = { __proto__: null }) {
+  if (config === null || typeof config !== 'object') throw argType('config', 'of type object', config);
+  const args = config.args !== undefined ? config.args : mainArgs();
+  const strict = config.strict !== undefined ? config.strict : true;
+  const allowPositionals = config.allowPositionals !== undefined ? config.allowPositionals : !strict;
+  const returnTokens = config.tokens !== undefined ? config.tokens : false;
+  const allowNegative = config.allowNegative !== undefined ? config.allowNegative : false;
+  const options = config.options !== undefined ? config.options : { __proto__: null };
+  if (!Array.isArray(args)) throw argType('args', 'an instance of Array', args);
+  for (const [name, value] of [['strict', strict], ['allowPositionals', allowPositionals], ['tokens', returnTokens], ['allowNegative', allowNegative]]) {
+    if (typeof value !== 'boolean') throw argType(name, 'of type boolean', value);
+  }
+  if (options === null || typeof options !== 'object') throw argType('options', 'of type object', options);
+
+  for (const [longOption, optionConfig] of Object.entries(options)) {
+    if (optionConfig === null || typeof optionConfig !== 'object') throw argType(`options.${longOption}`, 'of type object', optionConfig);
+    const type = optionsGetOwn(options, longOption, 'type');
+    if (type !== 'string' && type !== 'boolean') {
+      throw utilError(TypeError, 'ERR_INVALID_ARG_TYPE', `The "options.${longOption}.type" property must be ('string|boolean'). Received ${describeValue(type)}`);
+    }
+    const short = optionsGetOwn(options, longOption, 'short');
+    if (short !== undefined) {
+      if (typeof short !== 'string') throw argType(`options.${longOption}.short`, 'of type string', short);
+      if (short.length !== 1) {
+        throw utilError(TypeError, 'ERR_INVALID_ARG_VALUE', `The property 'options.${longOption}.short' must be a single character. Received ${inspect(short)}`);
+      }
+    }
+    const multiple = optionsGetOwn(options, longOption, 'multiple');
+    if (multiple !== undefined && typeof multiple !== 'boolean') throw argType(`options.${longOption}.multiple`, 'of type boolean', multiple);
+    const defaultValue = optionsGetOwn(options, longOption, 'default');
+    if (defaultValue !== undefined) {
+      const ok = multiple ? Array.isArray(defaultValue) && defaultValue.every((item) => typeof item === type) : typeof defaultValue === type;
+      if (!ok) throw argType(`options.${longOption}.default`, multiple ? `an instance of Array` : `of type ${type}`, defaultValue);
+    }
+  }
+
+  const tokens = argsToTokens(args, options);
+  const result = { values: { __proto__: null }, positionals: [] };
+  if (returnTokens) result.tokens = tokens;
+  const parseConfig = { options, allowPositionals, allowNegative };
+  for (const token of tokens) {
+    if (token.kind === 'option') {
+      if (strict) {
+        checkOptionUsage(parseConfig, token);
+        checkOptionLikeValue(token);
+      }
+      storeOption(token.name, token.value, options, result.values, allowNegative);
+    } else if (token.kind === 'positional') {
+      if (!allowPositionals) {
+        throw parseArgsError('ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL', `Unexpected argument '${token.value}'. This command does not take positional arguments`);
+      }
+      result.positionals.push(token.value);
+    }
+  }
+  for (const longOption of Object.keys(options)) {
+    const defaultValue = optionsGetOwn(options, longOption, 'default');
+    if (defaultValue !== undefined && result.values[longOption] === undefined && longOption !== '__proto__') {
+      result.values[longOption] = defaultValue;
+    }
+  }
+  return result;
+}
+
+// ---- Other utilities ----
+
+function toUSVString(input) {
+  return String(input).toWellFormed();
+}
+
+function getSystemErrorName(err) {
+  if (typeof err !== 'number') throw argType('err', 'of type number', err);
+  if (err >= 0 || !Number.isSafeInteger(err)) {
+    throw utilError(RangeError, 'ERR_OUT_OF_RANGE', `The value of "err" is out of range. It must be a negative integer. Received ${err}`);
+  }
+  return native.errorName(err);
+}
+
+// In Node.js's order. FrogJS has no KeyObjects or CryptoKeys yet.
+const types = {};
+for (const name of ['isExternal', 'isDate', 'isArgumentsObject', 'isBigIntObject', 'isBooleanObject', 'isNumberObject', 'isStringObject',
+                    'isSymbolObject', 'isNativeError', 'isRegExp', 'isAsyncFunction', 'isGeneratorFunction', 'isGeneratorObject', 'isPromise',
+                    'isMap', 'isSet', 'isMapIterator', 'isSetIterator', 'isWeakMap', 'isWeakSet', 'isArrayBuffer', 'isDataView',
+                    'isSharedArrayBuffer', 'isProxy', 'isModuleNamespaceObject', 'isAnyArrayBuffer', 'isBoxedPrimitive', 'isArrayBufferView',
+                    'isTypedArray', 'isUint8Array', 'isUint8ClampedArray', 'isUint16Array', 'isUint32Array', 'isInt8Array', 'isInt16Array',
+                    'isInt32Array', 'isFloat16Array', 'isFloat32Array', 'isFloat64Array', 'isBigInt64Array', 'isBigUint64Array']) {
+  types[name] = native.types[name];
+}
+types.isKeyObject = function isKeyObject() { return false; };
+types.isCryptoKey = function isCryptoKey() { return false; };
+
 return {
-  inspect,
+  callbackify,
+  debug: debuglog,
+  debuglog,
+  deprecate,
   format,
+  styleText,
   formatWithOptions,
-  isDeepStrictEqual,
+  getSystemErrorName,
   inherits,
+  inspect,
+  isArray: deprecate(Array.isArray, 'The `util.isArray` API is deprecated. Please use `Array.isArray()` instead.', 'DEP0044'),
+  isDeepStrictEqual,
   promisify,
   stripVTControlCharacters: removeColors,
+  toUSVString,
+  types,
+  parseArgs,
+  // Defined with process, which is set up after util
+  get TextDecoder() { return globalThis.TextDecoder; },
+  get TextEncoder() { return globalThis.TextEncoder; },
 };
 })
 )JS";
@@ -1031,6 +1631,64 @@ static void GetPromiseDetails(const FunctionCallbackInfo<Value>& args) {
 static void IsBoxedPrimitive(const FunctionCallbackInfo<Value>& args) {
     args.GetReturnValue().Set(args.Length() > 0 && (args[0]->IsNumberObject() || args[0]->IsStringObject() ||
         args[0]->IsBooleanObject() || args[0]->IsBigIntObject() || args[0]->IsSymbolObject()));
+}
+
+// util.types: V8's own checks of what a value is
+#define FROGJS_TYPE_CHECKS(V)                                                                                    \
+    V(isExternal, IsExternal) V(isDate, IsDate) V(isArgumentsObject, IsArgumentsObject)                          \
+    V(isBigIntObject, IsBigIntObject) V(isBooleanObject, IsBooleanObject) V(isNumberObject, IsNumberObject)     \
+    V(isStringObject, IsStringObject) V(isSymbolObject, IsSymbolObject) V(isNativeError, IsNativeError)         \
+    V(isRegExp, IsRegExp) V(isAsyncFunction, IsAsyncFunction) V(isGeneratorFunction, IsGeneratorFunction)      \
+    V(isGeneratorObject, IsGeneratorObject) V(isPromise, IsPromise) V(isMap, IsMap) V(isSet, IsSet)            \
+    V(isMapIterator, IsMapIterator) V(isSetIterator, IsSetIterator) V(isWeakMap, IsWeakMap)                     \
+    V(isWeakSet, IsWeakSet) V(isArrayBuffer, IsArrayBuffer) V(isDataView, IsDataView)                           \
+    V(isSharedArrayBuffer, IsSharedArrayBuffer) V(isProxy, IsProxy) V(isModuleNamespaceObject, IsModuleNamespaceObject) \
+    V(isArrayBufferView, IsArrayBufferView) V(isTypedArray, IsTypedArray) V(isUint8Array, IsUint8Array)         \
+    V(isUint8ClampedArray, IsUint8ClampedArray) V(isUint16Array, IsUint16Array) V(isUint32Array, IsUint32Array) \
+    V(isInt8Array, IsInt8Array) V(isInt16Array, IsInt16Array) V(isInt32Array, IsInt32Array)                     \
+    V(isFloat32Array, IsFloat32Array) V(isFloat64Array, IsFloat64Array) V(isBigInt64Array, IsBigInt64Array)     \
+    V(isBigUint64Array, IsBigUint64Array)
+
+#define FROGJS_DEFINE_TYPE_CHECK(name, method)                                          \
+    static void TypeCheck_##name(const FunctionCallbackInfo<Value>& args) {             \
+        args.GetReturnValue().Set(args.Length() > 0 && args[0]->method());              \
+    }
+FROGJS_TYPE_CHECKS(FROGJS_DEFINE_TYPE_CHECK)
+#undef FROGJS_DEFINE_TYPE_CHECK
+
+static void IsAnyArrayBuffer(const FunctionCallbackInfo<Value>& args) {
+    args.GetReturnValue().Set(args.Length() > 0 && (args[0]->IsArrayBuffer() || args[0]->IsSharedArrayBuffer()));
+}
+
+static void IsBoxedPrimitiveType(const FunctionCallbackInfo<Value>& args) {
+    args.GetReturnValue().Set(args.Length() > 0 && (args[0]->IsNumberObject() || args[0]->IsStringObject() ||
+        args[0]->IsBooleanObject() || args[0]->IsBigIntObject() || args[0]->IsSymbolObject()));
+}
+
+// Float16Array is new: true for one only where V8 has it
+static void IsFloat16Array(const FunctionCallbackInfo<Value>& args) {
+    if (args.Length() == 0 || !args[0]->IsTypedArray()) {
+        args.GetReturnValue().Set(false);
+        return;
+    }
+    Isolate* isolate = args.GetIsolate();
+    Local<Context> context = isolate->GetCurrentContext();
+    Local<Value> tag;
+    bool is_float16 = args[0].As<Object>()->Get(context, Symbol::GetToStringTag(isolate)).ToLocal(&tag) && tag->IsString() &&
+        tag->StrictEquals(String::NewFromUtf8Literal(isolate, "Float16Array"));
+    args.GetReturnValue().Set(is_float16);
+}
+
+// errorName(code): the libuv name of a negative error number ("ENOENT")
+static void ErrorName(const FunctionCallbackInfo<Value>& args) {
+    int code = args[0]->Int32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(0);
+    std::string name = uv_err_name(code);
+    if (name.compare(0, 7, "Unknown") == 0) name = "Unknown system error " + std::to_string(code);
+    args.GetReturnValue().Set(String::NewFromUtf8(args.GetIsolate(), name.c_str()).ToLocalChecked());
+}
+
+static void IsModuleNamespace(const FunctionCallbackInfo<Value>& args) {
+    args.GetReturnValue().Set(args.Length() > 0 && args[0]->IsModuleNamespaceObject());
 }
 
 static void IsBufferValue(const FunctionCallbackInfo<Value>& args) {
@@ -1128,6 +1786,16 @@ void SetupUtil(Isolate* isolate, Local<Context> context) {
     frogjs::SetFunction(isolate, context, native, "getPromiseDetails", GetPromiseDetails);
     frogjs::SetFunction(isolate, context, native, "isBoxedPrimitive", IsBoxedPrimitive);
     frogjs::SetFunction(isolate, context, native, "isBuffer", IsBufferValue);
+    frogjs::SetFunction(isolate, context, native, "isModuleNamespace", IsModuleNamespace);
+    frogjs::SetFunction(isolate, context, native, "errorName", ErrorName);
+    Local<Object> types = Object::New(isolate);
+#define FROGJS_SET_TYPE_CHECK(name, method) frogjs::SetFunction(isolate, context, types, #name, TypeCheck_##name);
+    FROGJS_TYPE_CHECKS(FROGJS_SET_TYPE_CHECK)
+#undef FROGJS_SET_TYPE_CHECK
+    frogjs::SetFunction(isolate, context, types, "isAnyArrayBuffer", IsAnyArrayBuffer);
+    frogjs::SetFunction(isolate, context, types, "isBoxedPrimitive", IsBoxedPrimitiveType);
+    frogjs::SetFunction(isolate, context, types, "isFloat16Array", IsFloat16Array);
+    native->Set(context, String::NewFromUtf8Literal(isolate, "types"), types).Check();
     frogjs::SetFunction(isolate, context, native, "bufferHex", BufferHex);
 
     Local<Value> argv[1] = {native};

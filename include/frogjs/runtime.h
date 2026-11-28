@@ -23,6 +23,11 @@ bool ExecuteScript(v8::Isolate* isolate, v8::Local<v8::Context> context, const s
 // ExecuteScript. Returns false if one ended the script.
 bool RunMainModule(v8::Isolate* isolate, v8::Local<v8::Context> context, const std::string& filename);
 
+// Run --eval or stdin code that has import or export as the main ES module
+// (Node.js detects this too). Returns false if an uncaught error ended it.
+bool RunMainSource(v8::Isolate* isolate, v8::Local<v8::Context> context, const std::string& code,
+                   const std::string& name);
+
 // Forget the module cache (before the thread's isolate is disposed)
 void ResetModuleState();
 

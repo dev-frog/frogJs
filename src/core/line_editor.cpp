@@ -50,7 +50,7 @@ LineEditor::~LineEditor() {
     Stop();
 }
 
-void LineEditor::Start(const std::string& prompt) {
+void LineEditor::Start(const std::string& prompt, bool draw) {
     prompt_ = prompt;
     line_.clear();
     cursor_ = 0;
@@ -72,7 +72,7 @@ void LineEditor::Start(const std::string& prompt) {
     raw.c_cc[VTIME] = 0;
     tcsetattr(fd_, TCSANOW, &raw);
     active_ = true;
-    Refresh();
+    if (draw) Refresh();
 }
 
 void LineEditor::Stop() {

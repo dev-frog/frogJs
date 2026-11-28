@@ -13,6 +13,23 @@ import { Readable, Writable, Transform, PassThrough, pipeline, finished } from '
 import * as stream from 'stream';
 import { spawn, exec, execSync, execFileSync, spawnSync, ChildProcess } from 'child_process';
 import { Worker, MessageChannel, receiveMessageOnPort, isMainThread } from 'worker_threads';
+import url = require('url');
+import querystring = require('querystring');
+import { StringDecoder } from 'string_decoder';
+import assert = require('assert');
+import strictAssert = require('assert/strict');
+import tty = require('tty');
+import readline = require('readline');
+import readlinePromises = require('readline/promises');
+import timers = require('timers');
+import timersPromises = require('timers/promises');
+import fsPromises = require('fs/promises');
+import streamPromises = require('stream/promises');
+import posixPath = require('path/posix');
+import { performance as perfHooksPerformance } from 'perf_hooks';
+import { Buffer as BufferFromModule, atob as atobFromModule } from 'buffer';
+import processFromModule = require('process');
+import { builtinModules, createRequire, isBuiltin } from 'module';
 
 let passed = 0;
 let failed = 0;
@@ -188,6 +205,72 @@ async function main(): Promise<void> {
     });
     check('net', reply === 'PING' && net.isIP('::1') === 6);
     echo.close();
+
+    // 1.1: web globals
+    const parsed = new URL('/a b?x=1#h', 'https://user@example.com:8080');
+    check('URL', parsed.href === 'https://user@example.com:8080/a%20b?x=1#h' && parsed.searchParams.get('x') === '1' && URL.canParse('nope') === false);
+    const params = new URLSearchParams([['a', '1'], ['b', '2']]);
+    params.append('a', '4');
+    check('URLSearchParams', params.getAll('a').join() === '1,4' && params.size === 3 && new URLSearchParams({ c: 'd' }).toString() === 'c=d');
+    const target = new EventTarget();
+    let seen: unknown;
+    target.addEventListener('ping', (event) => { seen = (event as CustomEvent<number>).detail; }, { once: true });
+    check('EventTarget', target.dispatchEvent(new CustomEvent('ping', { detail: 7 })) && seen === 7);
+    const controller = new AbortController();
+    controller.abort('why');
+    check('AbortController', controller.signal.aborted && controller.signal.reason === 'why' && AbortSignal.abort().reason instanceof DOMException);
+    check('DOMException', new DOMException('m', 'AbortError').code === DOMException.ABORT_ERR && atob(btoa('frog')) === 'frog');
+
+    // 1.1: modules
+    check('url module', url.URL === URL && url.fileURLToPath(url.pathToFileURL('/tmp/a b')) === '/tmp/a b' &&
+        url.parse('http://a.com/p?q=1', true).query.q === '1' && url.resolve('http://a.com/b/c', '../d') === 'http://a.com/d' &&
+        url.format({ protocol: 'http', host: 'a.com', pathname: '/x' }) === 'http://a.com/x' && url.domainToASCII('münchen.de') === 'xn--mnchen-3ya.de');
+    check('querystring', querystring.parse('a=1&a=2&b=3').a?.length === 2 && querystring.stringify({ a: [1, 2], b: 'c d' }) === 'a=1&a=2&b=c%20d');
+    const decoder = new StringDecoder('utf8');
+    check('string_decoder', decoder.write(Buffer.from([0xc3])) === '' && decoder.end(Buffer.from([0xa9])) === 'é');
+    assert(true);
+    assert.strictEqual(1, 1);
+    assert.deepStrictEqual({ a: [1] }, { a: [1] });
+    strictAssert.equal('1', '1');
+    assert.throws(() => { throw new TypeError('bad'); }, TypeError);
+    await assert.rejects(Promise.reject(new Error('no')), /no/);
+    let assertionError: unknown;
+    try { strictAssert.deepEqual([1], [2]); } catch (err) { assertionError = err; }
+    check('assert', assertionError instanceof assert.AssertionError && (assertionError as assert.AssertionError).code === 'ERR_ASSERTION' && assert.strict === strictAssert);
+    check('tty', typeof tty.isatty(1) === 'boolean' && typeof tty.WriteStream === 'function');
+    const lines: string[] = [];
+    const rl = readline.createInterface({ input: Readable.from(['one\ntwo\n']), crlfDelay: Infinity });
+    for await (const line of rl) lines.push(line);
+    check('readline', lines.join() === 'one,two' && readline.promises === readlinePromises);
+    const ask = readlinePromises.createInterface({ input: Readable.from(['yes\n']), output: new PassThrough(), terminal: false });
+    check('readline/promises', (await ask.question('? ')) === 'yes');
+    ask.close();
+    check('timers', timers.setTimeout === setTimeout && timers.promises === timersPromises);
+    check('timers/promises', (await timersPromises.setTimeout(1, 'v')) === 'v' && (await timersPromises.setImmediate(2)) === 2);
+    await timersPromises.scheduler.wait(1);
+    const aborted = new AbortController();
+    const waiting = timersPromises.setTimeout(10000, undefined, { signal: aborted.signal });
+    aborted.abort();
+    check('timers/promises with a signal', await waiting.then(() => false, (err: Error) => err.name === 'AbortError'));
+    check('aliases', fsPromises === fs.promises && streamPromises === stream.promises && posixPath === path &&
+        perfHooksPerformance === performance && BufferFromModule === Buffer && atobFromModule === atob && processFromModule === process);
+    check('module', builtinModules.includes('url') && isBuiltin('node:fs') && typeof createRequire(__filename)('path').join === 'function');
+    check('process.versions', process.versions.node.length > 0 && process.version === 'v' + process.versions.node && process.versions.frogjs.length > 0);
+
+    // 1.1: additions to util, crypto, events and fs
+    const { values, positionals } = util.parseArgs({ args: ['-v', 'file'], options: { verbose: { type: 'boolean', short: 'v' } }, allowPositionals: true });
+    check('util.parseArgs', values.verbose === true && positionals[0] === 'file');
+    check('util.types', util.types.isPromise(Promise.resolve()) && util.types.isDate(new Date()) && !util.types.isRegExp({}));
+    check('util.styleText', util.styleText('red', 'x', { validateStream: false }) === '\u001b[31mx\u001b[39m');
+    const callbackified = util.callbackify(async (n: number) => n * 2);
+    check('util.callbackify', await new Promise<boolean>((resolve) => callbackified(4, (err, value) => resolve(err === null && value === 8))));
+    check('util.getSystemErrorName', util.getSystemErrorName(-2) === 'ENOENT' && util.debuglog('frogjs-types-test').enabled === false);
+    check('crypto additions', crypto.randomFillSync(new Uint8Array(8)).length === 8 && crypto.webcrypto.randomUUID().length === 36);
+    const signalled = new AbortController();
+    const onceAborted = EventEmitter.once(new EventEmitter(), 'never', { signal: signalled.signal });
+    signalled.abort();
+    check('events.once with a signal', await onceAborted.then(() => false, (err: Error) => err.name === 'AbortError'));
+    check('fs with a signal', (await fs.promises.readFile(__filename, { encoding: 'utf8', signal: new AbortController().signal })).length > 0);
 
     console.log(`types usage: ${passed} passed, ${failed} failed`);
     if (failed > 0) process.exit(1);

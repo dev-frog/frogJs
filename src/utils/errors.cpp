@@ -55,7 +55,8 @@ void PrintValue(Isolate* isolate, Local<Context> context, Local<Value> exception
 
 // The steps after printing are shared: try the listeners first, print if none
 // took the error, then end the process unless this is the REPL
-bool Dispatch(Isolate* isolate, Local<Value> exception, TryCatch* try_catch, bool show_source) {
+bool Dispatch(Isolate* isolate, Local<Value> exception, TryCatch* try_catch, bool show_source,
+              Local<Message> message = Local<Message>()) {
     HandleScope handle_scope(isolate);
     Local<Context> context = isolate->GetCurrentContext();
     if (ForwardWorkerError(isolate, exception)) return false;
@@ -75,6 +76,9 @@ bool Dispatch(Isolate* isolate, Local<Value> exception, TryCatch* try_catch, boo
 
     if (try_catch != nullptr) {
         ReportException(isolate, try_catch, show_source);
+    } else if (show_source && !message.IsEmpty()) {
+        PrintSourceExcerpt(isolate, context, message);
+        PrintValue(isolate, context, exception);
     } else {
         PrintValue(isolate, context, exception);
     }
@@ -134,6 +138,10 @@ bool HandleUncaught(Isolate* isolate, TryCatch* try_catch) {
 
 bool HandleUncaughtValue(Isolate* isolate, Local<Value> exception) {
     return Dispatch(isolate, exception, nullptr, false);
+}
+
+bool HandleUncaughtWithMessage(Isolate* isolate, Local<Value> exception, Local<Message> message) {
+    return Dispatch(isolate, exception, nullptr, !tls_repl_active, message);
 }
 
 MaybeLocal<Value> MakeCallback(Isolate* isolate, Local<Context> context, Local<Function> callback,

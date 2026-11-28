@@ -43,12 +43,12 @@ FrogJS is a lightweight JavaScript runtime built on V8 and libuv, providing Node
 
 ### 6. Module System
 - ✅ `require()` following Node.js's algorithm: files, `.json`, directories, `node_modules`, scoped packages
-- ✅ `package.json`: `main`, and `exports` for exact subpaths and conditions
-- ✅ `node:` prefix; `buffer`, `timers`, `process`, `module` as modules
+- ✅ `package.json`: `main`, `type`, and `exports` and `imports` with conditions and `*` patterns
+- ✅ `node:` prefix; `buffer`, `timers`, `process`, `module`, `fs/promises`, `stream/promises`, `path/posix`, `perf_hooks` as modules
 - ✅ `require.resolve`, `require.cache`, `require.main`, `createRequire`, `module.paths`, ...
 - ✅ Circular requires get partial exports; failed modules aren't cached
 - ✅ The main script is a module (top-level `return`, its own scope)
-- ❌ ES modules
+- ✅ ES modules: `import`/`export`, `.mjs`/`.cjs`, `import()`, `import.meta`, JSON imports, top-level `await`, CommonJS interop and `require()` of ES modules
 
 ### 7. Path API
 POSIX path utilities matching Node.js `path.posix` (available as global `path` or `require('path')`)

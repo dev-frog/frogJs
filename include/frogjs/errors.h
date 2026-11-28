@@ -25,6 +25,9 @@ void ReportException(v8::Isolate* isolate, v8::TryCatch* try_catch, bool show_so
 // Returns true if the program can continue.
 bool HandleUncaught(v8::Isolate* isolate, v8::TryCatch* try_catch);
 bool HandleUncaughtValue(v8::Isolate* isolate, v8::Local<v8::Value> exception);
+// The same, printed with the source excerpt of message (an error an ES module
+// threw while it was evaluated, which arrives through a rejected promise)
+bool HandleUncaughtWithMessage(v8::Isolate* isolate, v8::Local<v8::Value> exception, v8::Local<v8::Message> message);
 
 // Call a JavaScript callback from the event loop. An exception goes through
 // HandleUncaught. The result is empty if the callback threw.

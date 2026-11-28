@@ -288,6 +288,58 @@ function randomInt(min, max, callback) {
   setTimeout(() => callback(null, result), 0);
 }
 
+// randomFillSync(buffer[, offset[, size]]) and randomFill(buffer[, offset[,
+// size]], callback): fill (part of) a buffer with random bytes. offset and
+// size count elements of a typed array, bytes otherwise.
+function randomFillArgs(buffer, offset, size) {
+  const isArrayBuffer = buffer instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && buffer instanceof SharedArrayBuffer);
+  if (!isArrayBuffer && !ArrayBuffer.isView(buffer)) {
+    throw makeError(TypeError, 'ERR_INVALID_ARG_TYPE', 'The "buf" argument must be an instance of ArrayBuffer or ArrayBufferView.' +
+      ` Received ${buffer === null ? 'null' : typeof buffer === 'object' ? 'an instance of ' + (buffer.constructor && buffer.constructor.name) : `type ${typeof buffer}`}`);
+  }
+  const elementSize = isArrayBuffer ? 1 : (buffer.BYTES_PER_ELEMENT || 1);
+  const byteLength = buffer.byteLength;
+  if (offset === undefined) offset = 0;
+  if (typeof offset !== 'number') throw makeError(TypeError, 'ERR_INVALID_ARG_TYPE', `The "offset" argument must be of type number. Received type ${typeof offset}`);
+  offset *= elementSize;
+  if (!Number.isInteger(offset) || offset < 0 || offset > byteLength) {
+    throw makeError(RangeError, 'ERR_OUT_OF_RANGE', `The value of "offset" is out of range. It must be >= 0 && <= ${byteLength}. Received ${offset}`);
+  }
+  if (size === undefined) size = byteLength - offset;
+  else {
+    if (typeof size !== 'number') throw makeError(TypeError, 'ERR_INVALID_ARG_TYPE', `The "size" argument must be of type number. Received type ${typeof size}`);
+    size *= elementSize;
+  }
+  if (!Number.isInteger(size) || size < 0 || size + offset > byteLength) {
+    throw makeError(RangeError, 'ERR_OUT_OF_RANGE', `The value of "size + offset" is out of range. It must be <= ${byteLength}. Received ${size + offset}`);
+  }
+  const base = isArrayBuffer ? 0 : buffer.byteOffset;
+  return new Uint8Array(isArrayBuffer ? buffer : buffer.buffer, base + offset, size);
+}
+
+function randomFillSync(buffer, offset, size) {
+  const bytes = randomFillArgs(buffer, offset, size);
+  if (bytes.length > 0) native.randomFill(bytes);
+  return buffer;
+}
+
+function randomFill(buffer, offset, size, callback) {
+  if (typeof offset === 'function') {
+    callback = offset;
+    offset = undefined;
+    size = undefined;
+  } else if (typeof size === 'function') {
+    callback = size;
+    size = undefined;
+  }
+  validateFunction(callback, 'callback');
+  const bytes = randomFillArgs(buffer, offset, size);
+  setImmediate(() => {
+    if (bytes.length > 0) native.randomFill(bytes);
+    callback(null, buffer);
+  });
+}
+
 // timingSafeEqual(a, b): compare without leaking where the inputs differ
 function timingSafeEqual(buf1, buf2) {
   const expected = 'an instance of ArrayBuffer, Buffer, TypedArray, or DataView';
@@ -299,6 +351,27 @@ function timingSafeEqual(buf1, buf2) {
   return native.timingSafeEqual(buf1, buf2);
 }
 
+// The Web Crypto object, as far as FrogJS has it: random values. Its methods
+// need it as their receiver, as in browsers and Node.js.
+class Crypto {
+  constructor(key) {
+    if (key !== kCryptoKey) throw makeError(TypeError, 'ERR_ILLEGAL_CONSTRUCTOR', 'Illegal constructor');
+  }
+
+  getRandomValues(data) {
+    if (!(this instanceof Crypto)) throw makeError(TypeError, 'ERR_INVALID_THIS', 'Value of "this" must be of type Crypto');
+    return getRandomValues(data);
+  }
+
+  randomUUID() {
+    if (!(this instanceof Crypto)) throw makeError(TypeError, 'ERR_INVALID_THIS', 'Value of "this" must be of type Crypto');
+    return randomUUID();
+  }
+}
+Object.defineProperty(Crypto.prototype, Symbol.toStringTag, { value: 'Crypto', configurable: true });
+const kCryptoKey = Symbol('Crypto');
+const webcrypto = new Crypto(kCryptoKey);
+
 return {
   createHash,
   createHmac,
@@ -308,10 +381,13 @@ return {
   pbkdf2,
   pbkdf2Sync,
   randomBytes,
+  randomFill,
+  randomFillSync,
   getRandomValues,
   randomUUID,
   randomInt,
   timingSafeEqual,
+  webcrypto,
 };
 })
 )JS";

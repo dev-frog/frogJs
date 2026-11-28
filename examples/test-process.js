@@ -17,6 +17,8 @@ run(async () => {
   check('arch', process.arch, os.arch());
   check('version', /^v\d+\.\d+\.\d+/.test(process.version), true);
   check('versions', [typeof process.versions.v8, typeof process.versions.uv], ['string', 'string']);
+  // process.version is the Node.js version (packages such as yargs-parser check its major)
+  check('version is versions.node', [process.version === 'v' + process.versions.node, Number(process.version.match(/^v(\d+)/)[1]) >= 20], [true, true]);
   check('execPath', require('path').isAbsolute(process.execPath), true);
   check('title', typeof process.title, 'string');
   check('release', typeof process.release.name, 'string');

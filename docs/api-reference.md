@@ -15,6 +15,12 @@ Complete API documentation for FrogJS runtime and built-in modules. `make check-
 - [Child Process API](#child-process-api)
 - [Worker Threads API](#worker-threads-api)
 - [Timer API](#timer-api)
+- [URL API](#url-api)
+- [Query String API](#query-string-api)
+- [String Decoder API](#string-decoder-api)
+- [Assert API](#assert-api)
+- [Readline API](#readline-api)
+- [TTY API](#tty-api)
 - [File System API](#file-system-api)
 - [Path API](#path-api)
 - [OS API](#os-api)
@@ -23,6 +29,7 @@ Complete API documentation for FrogJS runtime and built-in modules. `make check-
 - [Events API](#events-api)
 - [Stream API](#stream-api)
 - [Module System](#module-system)
+- [ES Modules](#es-modules)
 
 ---
 
@@ -40,7 +47,7 @@ frogjs                                     # start the REPL
 | `-p`, `--print <script>` | Evaluate `script` and print the result like `console.log` would |
 | `-c`, `--check` | Compile the script (or stdin) without running it; exit code 1 on a syntax error |
 | `-i`, `--interactive` | Start the REPL even if stdin is not a terminal, after running the script or `--eval` code |
-| `-v`, `--version` | Print the version (`v1.0.0`) |
+| `-v`, `--version` | Print the FrogJS version (`v1.1.0`) |
 | `-h`, `--help` | Print usage |
 | `-` | Read the script from stdin (the default when no script is given and stdin is not a terminal) |
 | `--` | End of options: the next argument is the script |
@@ -53,6 +60,7 @@ Short options combine (`-pe "1 + 1"`), and long options accept `--eval=code`. Op
 - `0` - success
 - `1` - uncaught error in the main script, or the script file can't be read
 - `9` - invalid option
+- `13` - the main ES module has a top-level `await` that never settles
 
 **Uncaught errors** print the location, the source line, a caret and the stack; the event loop does not run afterwards:
 ```
@@ -92,6 +100,7 @@ undefined
 - Input that is not finished yet (an open `{`, `(` or template literal) continues on a `...` prompt
 - Input that starts with `{` is tried as an object literal first: `{ a: 1 }` prints `{ a: 1 }`
 - `_` holds the last result, `_error` the last uncaught error
+- Top-level `await` works: `await fetchThing()` waits and prints the result, and `const x = await ...` keeps `x` defined for later lines. A rejection is reported as `Uncaught` like a thrown error
 - The event loop runs while the prompt waits: timers fire and servers accept connections, and their output is printed above the prompt
 - Without a terminal (`echo "1 + 1" | frogjs -i`), lines are read and evaluated in order without line editing; the REPL ends at the end of input
 
@@ -101,6 +110,7 @@ undefined
 | `.exit` | Exit the REPL |
 | `.clear` | Abandon the current input and start over in a fresh context (globals, declarations and the module cache are cleared) |
 | `.break` | Abandon multi-line input |
+| `.editor` | Enter several lines freely; Ctrl+D runs them all, Ctrl+C cancels |
 | `.load <file>` | Evaluate a file in the session |
 | `.save <file>` | Save the lines entered so far to a file |
 
@@ -144,6 +154,37 @@ A deep copy by the structured clone algorithm: `Map`, `Set`, `Date`, `RegExp`, `
 ### `performance`
 `performance.now()` is milliseconds since the process started, with sub-millisecond precision. `performance.timeOrigin` is when that was, in Unix milliseconds. `performance.toJSON()` returns `{ timeOrigin }`.
 
+### `URL`, `URLSearchParams`
+See [URL API](#url-api).
+
+### `EventTarget`, `Event`, `CustomEvent`
+The DOM event classes. `target.addEventListener(type, listener[, options])` takes a function or an object with `handleEvent`, and the options `once`, `capture`, `passive` and `signal` (aborting it removes the listener); `removeEventListener(type, listener[, options])` removes one, and `AbortSignal` is an `EventTarget` too. `dispatchEvent(event)` calls the listeners synchronously and returns `false` if one called `preventDefault()` on a cancelable event. An `Event` has `type`, `target`, `currentTarget`, `eventPhase`, `bubbles`, `cancelable`, `composed`, `defaultPrevented`, `timeStamp`, `isTrusted`, `composedPath()`, `preventDefault()`, `stopPropagation()` and `stopImmediatePropagation()`; a `CustomEvent` adds `detail`. A listener that throws is reported as an uncaught exception, after the other listeners ran.
+
+### `AbortController`, `AbortSignal`
+`new AbortController()` has a `signal` and `abort([reason])`. A signal has `aborted`, `reason`, `throwIfAborted()`, `onabort` and an `'abort'` event. The default reason is a `DOMException` named `AbortError`.
+
+- `AbortSignal.abort([reason])`: a signal that is already aborted
+- `AbortSignal.timeout(ms)`: aborts with a `TimeoutError` `DOMException`; it doesn't keep the process alive
+- `AbortSignal.any(signals)`: aborts when the first of `signals` does, with its reason
+
+`signal` is accepted by `events.once()` and `events.on()`, `addEventListener()`, `timers/promises`, `fs.readFile()` and `fs.writeFile()` (and their `fs.promises` forms), `child_process.spawn()`, `exec()` and `execFile()`, and `readline`. Aborting rejects or calls back with an `AbortError` whose `cause` is the reason. A `signal` that isn't an `AbortSignal` throws `ERR_INVALID_ARG_TYPE`.
+
+```javascript
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 1000);
+try {
+    await fs.promises.readFile('/dev/zero', { signal: controller.signal });
+} catch (err) {
+    console.log(err.name); // 'AbortError'
+}
+```
+
+### `DOMException`
+`new DOMException([message[, name or { name, cause }]])`. `name` defaults to `'Error'`; `code` is the legacy number for the name (`DOMException.ABORT_ERR` is 20) and 0 for newer names such as `AbortError` and `TimeoutError`.
+
+### `atob(data)`, `btoa(data)`
+Base64 decode to, and encode from, a string of Latin-1 characters. Invalid input throws an `InvalidCharacterError` `DOMException`. Also `require('buffer').atob` and `.btoa`.
+
 ### `TextEncoder`, `TextDecoder`
 `new TextEncoder().encode(string)` returns a `Uint8Array` of UTF-8; `encoding` is `'utf-8'`. `new TextDecoder([encoding[, { fatal, ignoreBOM }]]).decode(bytes)` supports UTF-8 only (`ERR_ENCODING_NOT_SUPPORTED` otherwise); with `fatal`, invalid input throws `ERR_ENCODING_INVALID_ENCODED_DATA`.
 
@@ -162,7 +203,7 @@ A deep copy by the structured clone algorithm: `Map`, `Set`, `Date`, `RegExp`, `
 | `process.env` | Environment variables, as a plain object. Child processes get its current content |
 | `process.pid`, `process.ppid` | Process IDs |
 | `process.platform`, `process.arch` | e.g. `'darwin'`, `'arm64'` |
-| `process.version`, `process.versions` | `'v1.0.0'`; `{ frogjs, v8, uv }` |
+| `process.version`, `process.versions` | The Node.js version whose API FrogJS follows (`'v24.3.0'`), so that packages checking it work; `{ node, frogjs, v8, uv }` (`versions.frogjs` is the FrogJS version) |
 | `process.release` | `{ name: 'frogjs' }` |
 | `process.title` | `'frogjs'` (setting it only changes the property) |
 | `process.config`, `process.features` | Empty objects, for code that reads them |
@@ -298,7 +339,37 @@ Sets up prototype inheritance between constructor functions (prefer `class ... e
 `true` if `a` and `b` have the same own enumerable properties and prototypes, compared recursively.
 
 ### `util.stripVTControlCharacters(str)`
-Removes ANSI color codes from `str`.
+Removes ANSI escape codes from `str`.
+
+### `util.parseArgs([config])`
+Parses command line arguments, as in Node.js. `config.args` defaults to `process.argv` without the executable and script; `config.options` maps each long name to `{ type: 'boolean' | 'string', short, multiple, default }`. `strict` (default `true`) throws on unknown options and missing values; `allowPositionals` defaults to `!strict`; `allowNegative` accepts `--no-name`; `tokens: true` also returns how each argument was read. Returns `{ values, positionals[, tokens] }`.
+
+```javascript
+const { values, positionals } = util.parseArgs({
+    args: ['-v', '--out', 'dist', 'src'],
+    options: { verbose: { type: 'boolean', short: 'v' }, out: { type: 'string' } },
+    allowPositionals: true,
+});
+// values: { verbose: true, out: 'dist' }, positionals: ['src']
+```
+
+### `util.styleText(format, text[, { stream, validateStream }])`
+`text` wrapped in the ANSI codes of `format`, a style name or an array of them (`'red'`, `'bgBlue'`, `'bold'`, `'underline'`, the names in `util.inspect.colors`). With `validateStream` (default `true`), the codes are left out when `stream` (default `process.stdout`) doesn't show colors (not a terminal, or `NO_COLOR`).
+
+### `util.callbackify(fn)`
+The reverse of `promisify`: wraps an async function into one that takes an `(err, value)` callback last. A rejection with a falsy value becomes an error with code `ERR_FALSY_VALUE_REJECTION` and the value in `reason`.
+
+### `util.deprecate(fn, message[, code])`
+Wraps `fn` so that its first call emits a `DeprecationWarning` with `message` (once per `code` when one is given). `--no-deprecation` isn't supported; listen for `process.on('warning')` instead.
+
+### `util.debuglog(section[, callback])`, `util.debug`
+A logger that writes `SECTION PID: message` to stderr when the `NODE_DEBUG` environment variable lists `section` (comma separated, `*` wildcards), and does nothing otherwise. Its `enabled` property says which.
+
+### `util.types`
+Checks for kinds of built-in objects that work across realms, unlike `instanceof`: `isPromise`, `isDate`, `isRegExp`, `isMap`, `isSet`, `isNativeError`, `isAsyncFunction`, `isGeneratorFunction`, `isGeneratorObject`, `isArrayBuffer`, `isAnyArrayBuffer`, `isSharedArrayBuffer`, `isDataView`, `isArrayBufferView`, `isTypedArray`, `isUint8Array` and the other typed arrays, `isProxy`, `isBoxedPrimitive`, `isModuleNamespaceObject`, ... as in Node.js. `isKeyObject` and `isCryptoKey` are always `false`.
+
+### `util.getSystemErrorName(errno)`, `util.toUSVString(string)`, `util.isArray(value)`
+The name of a negative errno (`-2` is `'ENOENT'`); `string` with lone surrogates replaced by U+FFFD; and the deprecated `Array.isArray`. `util.TextEncoder` and `util.TextDecoder` are the globals.
 
 ---
 
@@ -322,7 +393,170 @@ Run `callback` after the I/O of the current loop iteration. An immediate added w
 ### `clearTimeout(timer)`, `clearInterval(timer)`, `clearImmediate(immediate)`
 Cancel it. Anything else, or a timer that already ended, is ignored.
 
-`require('timers')` has the same functions.
+`require('timers')` has the same functions, and `promises`.
+
+### `require('timers/promises')`
+- `setTimeout(delay[, value[, { signal, ref }]])`: a promise of `value` after `delay` ms
+- `setImmediate([value[, { signal, ref }]])`: a promise of `value` after the current I/O
+- `setInterval(delay[, value[, { signal, ref }]])`: an async iterator that yields `value` every `delay` ms
+- `scheduler.wait(delay[, { signal }])` and `scheduler.yield()`
+
+`ref: false` doesn't keep the process alive while waiting. Aborting `signal` rejects with an `AbortError`.
+
+```javascript
+const { setTimeout: sleep } = require('timers/promises');
+await sleep(100);
+```
+
+---
+
+## URL API
+
+`URL` and `URLSearchParams` are globals and `require('url')` exports; they follow the [WHATWG URL Standard](https://url.spec.whatwg.org/) and pass the web-platform-tests cases Node.js passes.
+
+### `new URL(input[, base])`
+Parses `input`, relative to `base` if given; throws a `TypeError` with code `ERR_INVALID_URL` if it doesn't parse. The parts `href`, `protocol`, `username`, `password`, `host`, `hostname`, `port`, `pathname`, `search` and `hash` can be read and set (setting one updates the others); `origin` and `searchParams` are read-only. `toString()` and `toJSON()` return `href`. International domain names become Punycode.
+
+```javascript
+const url = new URL('../b?x=1#top', 'https://example.com/a/c');
+url.href;                      // 'https://example.com/b?x=1#top'
+url.searchParams.get('x');     // '1'
+url.port = '8080';
+url.host;                      // 'example.com:8080'
+```
+
+- `URL.canParse(input[, base])`: whether it would parse
+- `URL.parse(input[, base])`: the URL, or `null` instead of throwing
+- `URL.createObjectURL()` and `URL.revokeObjectURL()` exist but throw / do nothing: FrogJS has no `Blob`
+
+### `new URLSearchParams([init])`
+The query as an ordered list of pairs. `init` is a query string (a leading `?` is ignored), an object of strings, an iterable of `[name, value]` pairs, or another `URLSearchParams`. Methods: `append(name, value)`, `delete(name[, value])`, `get(name)` (`null` if missing), `getAll(name)`, `has(name[, value])`, `set(name, value)`, `sort()`, `forEach()`, `keys()`, `values()`, `entries()`, iteration, `size` and `toString()`. A `URL`'s `searchParams` stays in sync with its `search`.
+
+### `url.fileURLToPath(url)`, `url.pathToFileURL(path)`
+Convert between `file:` URLs (strings or `URL`s) and absolute paths, escaping `%`, `#`, `?`, spaces and other characters. `fileURLToPath` throws `ERR_INVALID_URL_SCHEME` for other schemes.
+
+### `url.domainToASCII(domain)`, `url.domainToUnicode(domain)`
+Punycode and Unicode forms of a domain name (`''` if it isn't valid). `url.urlToHttpOptions(url)` returns the options `http.request()` takes.
+
+### Legacy API: `url.parse(urlString[, parseQueryString[, slashesDenoteHost]])`, `url.format(urlObject)`, `url.resolve(from, to)`
+Node.js's older parser, kept for old packages; prefer `new URL()`. `parse` returns a `Url` object with `protocol`, `slashes`, `auth`, `host`, `port`, `hostname`, `hash`, `search`, `query` (an object with `parseQueryString`), `pathname`, `path` and `href`, where missing parts are `null`. `format` accepts such an object, a string or a `URL` (with `{ auth, fragment, search, unicode }`). `resolve` resolves a link the way a browser does: `url.resolve('http://a.com/b/c', '../d')` is `'http://a.com/d'`. `url.resolveObject()` and `Url.prototype.parse`, `format`, `resolve`, `resolveObject` and `parseHost` are there too.
+
+---
+
+## Query String API
+
+`require('querystring')`: Node.js's `application/x-www-form-urlencoded` helpers.
+
+- `querystring.parse(str[, sep[, eq[, { maxKeys, decodeURIComponent }]]])` (also `decode`): an object; a name that appears more than once gets an array. `maxKeys` defaults to 1000 (0 for no limit)
+- `querystring.stringify(obj[, sep[, eq[, { encodeURIComponent }]]])` (also `encode`): arrays give one pair per value, and values other than strings, numbers, bigints and booleans become `''`
+- `querystring.escape(str)`, `querystring.unescape(str)`, `querystring.unescapeBuffer(str[, decodeSpaces])`: the percent-encoding they use
+
+```javascript
+querystring.parse('a=1&a=2&b=x%20y');          // { a: ['1', '2'], b: 'x y' }
+querystring.stringify({ q: 'frog js', n: 2 });  // 'q=frog%20js&n=2'
+```
+
+---
+
+## String Decoder API
+
+`require('string_decoder')`.
+
+### `new StringDecoder([encoding])`
+Decodes Buffers into strings, keeping the bytes of a character that is split between chunks for the next call. `encoding` is any [Buffer encoding](#buffer-encodings) (default `'utf8'`). `decoder.write(buffer)` returns what can be decoded so far; `decoder.end([buffer])` returns the rest, with incomplete characters as U+FFFD. `text()` and `fillLast()` are the internal steps, as in Node.js.
+
+```javascript
+const decoder = new StringDecoder('utf8');
+decoder.write(Buffer.from([0xe2, 0x82]));  // ''
+decoder.write(Buffer.from([0xac]));        // '€'
+```
+
+---
+
+## Assert API
+
+`require('assert')` and `require('assert/strict')` (also `assert.strict`). Failures throw an `AssertionError` (`code: 'ERR_ASSERTION'`, with `actual`, `expected`, `operator` and `generatedMessage`) whose messages and diffs match Node.js's. A `message` argument that is an `Error` is thrown instead.
+
+| Function | Passes when |
+|----------|-------------|
+| `assert(value[, message])`, `assert.ok(value[, message])` | `value` is truthy. Without a message, the message is the source of the call: `assert.ok(typeof x === 'string')` |
+| `assert.equal(a, b)`, `assert.notEqual(a, b)` | `a == b` (and `NaN` equals `NaN`); strict in `assert/strict` |
+| `assert.strictEqual(a, b)`, `assert.notStrictEqual(a, b)` | `Object.is(a, b)` |
+| `assert.deepEqual(a, b)`, `assert.notDeepEqual(a, b)` | The same contents, compared loosely; strict in `assert/strict` |
+| `assert.deepStrictEqual(a, b)`, `assert.notDeepStrictEqual(a, b)` | The same contents and prototypes, with `Object.is` for primitives. Maps, Sets, Dates, RegExps, errors, typed arrays, boxed primitives and cycles are compared by content |
+| `assert.partialDeepStrictEqual(actual, expected)` | Like `deepStrictEqual`, but `actual` may have more properties and entries |
+| `assert.throws(fn[, error][, message])`, `assert.doesNotThrow(fn[, error][, message])` | `fn` throws (an error matching `error`: a class, a RegExp for the message, a validation function or an object of properties to compare) |
+| `assert.rejects(promiseOrFn[, error][, message])`, `assert.doesNotReject(...)` | The same for a promise, or one a function returns. Returns a promise |
+| `assert.match(string, regexp)`, `assert.doesNotMatch(string, regexp)` | `regexp` matches `string` |
+| `assert.ifError(value)` | `value` is `null` or `undefined`; otherwise throws it |
+| `assert.fail([message])` | Never |
+
+```javascript
+const assert = require('assert/strict');
+assert.deepEqual({ a: [1, 2] }, { a: [1, 3] });
+// AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+// + actual - expected
+//
+//   {
+//     a: [
+//       1,
+// +     2
+// -     3
+//     ]
+//   }
+```
+
+`new assert.AssertionError({ message, actual, expected, operator })` makes one. `assert.CallTracker` (deprecated in Node.js) is there too: `tracker.calls([fn][, exact])` wraps a function, and `getCalls(fn)`, `report()`, `reset([fn])` and `verify()` check the counts.
+
+---
+
+## Readline API
+
+`require('readline')` and `require('readline/promises')` (also `readline.promises`).
+
+### `readline.createInterface(options)` / `createInterface(input[, output[, completer[, terminal]]])`
+Reads `input` (a Readable) line by line and emits `'line'` for each. Options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `input` | | The stream to read |
+| `output` | | Where prompts and echo go |
+| `terminal` | `output.isTTY` | Edit lines with the REPL's keys, history and completion |
+| `completer` | | `(line) => [matches, substring]`, or the same with a callback |
+| `prompt` | `'> '` | |
+| `history`, `historySize`, `removeHistoryDuplicates` | `[]`, `30`, `false` | |
+| `crlfDelay` | `100` | A `\r` and a `\n` within this many ms count as one line ending |
+| `signal` | | Aborting it closes the interface |
+
+An `Interface` is an EventEmitter (`'line'`, `'close'`, `'pause'`, `'resume'`, `'history'`, `'SIGINT'`) and an async iterable of lines. Methods: `setPrompt()`, `getPrompt()`, `prompt([preserveCursor])`, `question(query[, { signal }], callback)`, `write(data[, key])`, `pause()`, `resume()`, `close()`, `getCursorPos()`; properties `line`, `cursor`, `terminal`, `closed`, `columns`.
+
+```javascript
+const rl = readline.createInterface({ input: fs.createReadStream('log.txt'), crlfDelay: Infinity });
+for await (const line of rl) console.log(line.length);
+```
+
+### `require('readline/promises')`
+The same `createInterface()`, but `question(query[, { signal }])` returns a promise. `new Readline(stream[, { autoCommit }])` collects `cursorTo()`, `moveCursor()`, `clearLine()` and `clearScreenDown()` and writes them on `commit()` (or drops them on `rollback()`).
+
+```javascript
+const readline = require('readline/promises');
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const name = await rl.question('Name? ');
+rl.close();
+```
+
+### Terminal helpers
+`readline.cursorTo(stream, x[, y][, callback])`, `moveCursor(stream, dx, dy[, callback])`, `clearLine(stream, dir[, callback])` (`-1` left of the cursor, `1` right, `0` all) and `clearScreenDown(stream[, callback])` write the ANSI sequences. `readline.emitKeypressEvents(stream)` makes `stream` emit `'keypress'` `(string, { name, ctrl, meta, shift, sequence })`.
+
+---
+
+## TTY API
+
+`require('tty')`.
+
+- `tty.isatty(fd)`: whether the descriptor is a terminal
+- `tty.ReadStream`: what `process.stdin` is when fd 0 is a terminal. `setRawMode(flag)` turns raw mode on and off (keys one at a time, no echo); `isRaw` says which
+- `tty.WriteStream`: what `process.stdout` and `process.stderr` are when they are terminals. `columns`, `rows`, `getWindowSize()` and a `'resize'` event; `getColorDepth([env])` (1, 4, 8 or 24, from `NO_COLOR`, `FORCE_COLOR`, `TERM` and `COLORTERM`) and `hasColors([count][, env])`; `cursorTo()`, `moveCursor()`, `clearLine()` and `clearScreenDown()` as in `readline`
 
 ---
 
@@ -341,6 +575,8 @@ Cancel it. Anything else, or a timer that already ended, is ignored.
 |----------|---|
 | `fs.readFile(path[, options], callback)` / `readFileSync` | `path` can be a file descriptor. Without an encoding the result is a Buffer. `options` is an encoding or `{ encoding, flag }` |
 | `fs.writeFile(path, data[, options], callback)` / `writeFileSync` | `data` is a string or typed array. `options` is an encoding or `{ encoding, mode, flag }` |
+
+`readFile` and `writeFile`, and their `fs.promises` forms, also take a `signal` (an [`AbortSignal`](#abortcontroller-abortsignal)): aborting fails the call with an `AbortError`. `require('fs/promises')` is `fs.promises`.
 | `fs.appendFile(path, data[, options], callback)` / `appendFileSync` | The same, appending |
 
 ```javascript
@@ -732,21 +968,27 @@ A copy of the listeners for `name`, like `emitter.listeners(name)`.
 - `'removeListener'` `(name, listener)`: Emitted after a listener is removed
 
 ### Helpers
-#### `events.once(emitter, name)`
-A Promise that resolves with the arguments array of the next `name` event, or rejects if `'error'` is emitted first.
+#### `events.once(emitter, name[, { signal }])`
+A Promise that resolves with the arguments array of the next `name` event, or rejects if `'error'` is emitted first. `emitter` can also be an `EventTarget`. Aborting `signal` rejects with an `AbortError`.
 
 ```javascript
 const [port] = await EventEmitter.once(server, 'ready');
 ```
 
-#### `events.on(emitter, name)`
-An async iterator over the argument arrays of `name` events. An `'error'` event makes the loop throw; `break` removes the listeners.
+#### `events.on(emitter, name[, { signal }])`
+An async iterator over the argument arrays of `name` events. An `'error'` event makes the loop throw, and so does aborting `signal` (with an `AbortError`); `break` removes the listeners.
 
 ```javascript
 for await (const [chunk] of EventEmitter.on(source, 'chunk')) {
     if (chunk === 'stop') break;
 }
 ```
+
+#### `events.addAbortListener(signal, listener)`
+Call `listener` once when `signal` aborts, even if another listener called `stopImmediatePropagation()`. Returns an object whose `[Symbol.dispose]()` removes it.
+
+#### `events.setMaxListeners([n[, ...targets]])`, `events.getMaxListeners(target)`
+Set the listener limit of each `EventEmitter` or `EventTarget` in `targets`, or with none, of all new EventEmitters. Read one target's limit.
 
 #### Inheritance
 `class X extends EventEmitter`, the older `EventEmitter.call(this)` pattern, and objects created with `Object.create(EventEmitter.prototype)` all work.
@@ -1062,6 +1304,12 @@ Returns a random RFC 4122 version 4 UUID string, e.g. `'1b9d6bcd-bbfd-4b2d-9b5d-
 ### `crypto.getRandomValues(typedArray)`
 Fills an integer TypedArray (`Uint8Array`, `Int32Array`, `BigUint64Array`, ...) with random values in place and returns it. At most 65,536 bytes per call.
 
+### `crypto.randomFillSync(buffer[, offset[, size]])`, `crypto.randomFill(buffer[, offset[, size]], callback)`
+Fill a Buffer, typed array, DataView or ArrayBuffer (from `offset`, `size` bytes) with random bytes. The sync form returns `buffer`; the other calls `callback(err, buffer)`.
+
+### `crypto.webcrypto`
+The Web Crypto object, with `getRandomValues()` and `randomUUID()`. There is no `subtle` yet (planned for 1.2).
+
 ### `crypto.timingSafeEqual(a, b)`
 Compares two Buffers, TypedArrays, DataViews or ArrayBuffers in constant time, so the time taken doesn't reveal where they differ. Use it to check tokens and signatures. Throws `RangeError [ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH]` if the lengths differ.
 
@@ -1078,14 +1326,14 @@ Returns the supported hash names.
 
 ## Module System
 
-CommonJS, following Node.js's algorithm. ES modules (`import`) aren't supported; TypeScript or a bundler can compile them to CommonJS.
+CommonJS and [ES modules](#es-modules), following Node.js's algorithms. This section covers `require()`.
 
 ### `require(id)`
-1. **Built-in**: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`, `child_process`, `worker_threads`, `buffer`, `timers`, `process`, `module`, optionally with a `node:` prefix. An unknown `node:` name throws `ERR_UNKNOWN_BUILTIN_MODULE`.
-2. **A path** (`./`, `../`, `/`), from the requiring module's directory: the exact file, then with `.js` and `.json`, then as a directory: `package.json`'s `main`, then `index.js` and `index.json`.
-3. **A package**: the same in `node_modules` of the module's directory and each parent, including scoped names (`@scope/pkg`) and subpaths (`pkg/lib/x`). `package.json`'s `exports` is honored for exact subpaths and the `require`, `node` and `default` conditions (not patterns with `*`). A subpath it doesn't list throws `ERR_PACKAGE_PATH_NOT_EXPORTED`, and a target leaving the package throws `ERR_INVALID_PACKAGE_TARGET`.
+1. **Built-in**: `fs`, `fs/promises`, `net`, `http`, `path`, `path/posix`, `os`, `events`, `stream`, `stream/promises`, `util`, `crypto`, `child_process`, `worker_threads`, `buffer`, `timers`, `timers/promises`, `process`, `module`, `url`, `querystring`, `string_decoder`, `assert`, `assert/strict`, `readline`, `readline/promises`, `tty` and `perf_hooks`, optionally with a `node:` prefix. An unknown `node:` name throws `ERR_UNKNOWN_BUILTIN_MODULE`.
+2. **A path** (`./`, `../`, `/`), from the requiring module's directory: the exact file, then with `.js` and `.json` added, then as a directory: `package.json`'s `main`, then `index.js` and `index.json`.
+3. **A package**: the same in `node_modules` of the module's directory and each parent, including scoped names (`@scope/pkg`) and subpaths (`pkg/lib/x`). `package.json`'s `exports` is honored with the `require`, `node` and `default` conditions, nested conditions and `*` patterns; `imports` (`#name`) works the same way inside a package. A subpath it doesn't list throws `ERR_PACKAGE_PATH_NOT_EXPORTED`, and a target leaving the package throws `ERR_INVALID_PACKAGE_TARGET`.
 
-Not found throws `MODULE_NOT_FOUND` with `requireStack`. `.json` files are parsed; anything else runs as JavaScript in a function, so top-level `var` stays private and top-level `return` works. A leading BOM and `#!` line are ignored.
+Not found throws `MODULE_NOT_FOUND` with `requireStack`. `.json` files are parsed; `.cjs` files, `.js` files in a package without `"type": "module"`, and files without an extension run as CommonJS in a function, so top-level `var` stays private and top-level `return` works. A leading BOM and `#!` line are ignored. An ES module (`.mjs`, or `.js` under `"type": "module"`) can be required too: see [ES Modules](#es-modules).
 
 ### `require.resolve(id)`, `require.cache`, `require.main`
 The file `id` would load (or the name of a built-in); loaded modules by file name (delete an entry to load it again); the main module.
@@ -1100,7 +1348,48 @@ A module runs once per file. It is cached before it runs, so a circular `require
 Exceptions propagate to the caller of `require()`; uncaught ones are reported with the module's file and line.
 
 ### `require('module')`
-`builtinModules` lists the built-in names. `createRequire(filename)` returns a `require` that resolves from that file.
+`builtinModules` lists the built-in names, and `isBuiltin(name)` checks one (with or without `node:`). `createRequire(filename)` returns a `require` that resolves from that file (a path or a `file:` URL).
+
+---
+
+## ES Modules
+
+`import` and `export` work as in Node.js, on V8's module support.
+
+### Which files are ES modules
+- `.mjs` files, and `.js` files whose nearest `package.json` has `"type": "module"`
+- A `.js` file with no `"type"` at all that only parses as a module (it has `import` or `export`): it is run as one, with the same `MODULE_TYPELESS_PACKAGE_JSON` warning as Node.js if a `package.json` exists. This also applies to `-e` code and stdin
+- `.cjs` files are always CommonJS, and `.json` files can be imported with `with { type: 'json' }`
+
+### Importing
+`import` specifiers are relative URLs (`./x.js`, with the extension), absolute `file:` URLs, `data:` URLs, built-in names (`fs` or `node:fs`) or package names. Packages resolve through `exports` and `imports` with the `import`, `node` and `default` conditions, nested conditions and `*` patterns, or `main`. A missing file throws `ERR_MODULE_NOT_FOUND`; a directory or a path without its extension is not searched, as in Node.js.
+
+Built-ins have their exports as named exports and `module.exports` as the default: `import { readFile } from 'fs'`, `import fs from 'fs'`. A CommonJS module's default export is its `module.exports`, and the names Node.js's `cjs-module-lexer` finds (`exports.x = ...`, `module.exports = { x }`, re-exports) are named exports.
+
+`import()` loads an ES module from both CommonJS and ES modules and returns a promise of its namespace.
+
+### `import.meta`
+- `import.meta.url`: the module's `file:` URL
+- `import.meta.filename` and `import.meta.dirname`: its path and directory
+- `import.meta.resolve(specifier)`: the URL `specifier` would load
+
+There are no `require`, `module`, `exports`, `__filename` or `__dirname` in an ES module; use `createRequire(import.meta.url)` and `import.meta.dirname`.
+
+### Top-level `await`
+ES modules can `await` at the top level. If the main module waits on a promise that never settles once nothing else is left to run, FrogJS prints a warning and exits with code 13, like Node.js.
+
+### `require()` of an ES module
+Returns its namespace object (with `__esModule: true`, so transpiled code sees the default export as `default`), as in Node.js 22 and later. A module that uses top-level `await` can't be required: it throws `ERR_REQUIRE_ASYNC_MODULE`; use `import()`.
+
+```javascript
+// main.mjs
+import { readFile } from 'node:fs/promises';
+import config from './config.json' with { type: 'json' };
+import chalk from 'chalk';
+
+const text = await readFile(new URL('./notes.txt', import.meta.url), 'utf8');
+console.log(chalk.green(config.name), text.length);
+```
 
 ---
 
@@ -1235,6 +1524,7 @@ Start `command` and return a `ChildProcess` straight away.
 | `uid`, `gid` | | Run as this user / group |
 | `timeout` | | Milliseconds before the child is sent `killSignal` |
 | `killSignal` | `'SIGTERM'` | Signal for `timeout` |
+| `signal` | | An `AbortSignal`: aborting it sends `killSignal` and emits an `AbortError` as `'error'` |
 
 ```javascript
 const { spawn } = require('child_process');
@@ -1267,7 +1557,8 @@ Run `command` in `/bin/sh` and buffer its output: `callback(err, stdout, stderr)
 | `encoding` | `'utf8'` | Encoding of `stdout`/`stderr`; `'buffer'` for Buffers |
 | `timeout` | `0` | Kill the child after this many milliseconds |
 | `maxBuffer` | `1048576` | Bytes allowed on stdout or stderr before the child is killed (`ERR_CHILD_PROCESS_STDIO_MAXBUFFER`) |
-| `killSignal` | `'SIGTERM'` | Signal used by `timeout` and `maxBuffer` |
+| `killSignal` | `'SIGTERM'` | Signal used by `timeout`, `maxBuffer` and `signal` |
+| `signal` | | An `AbortSignal`: aborting it kills the child and calls back with an `AbortError` |
 | `cwd`, `env`, `shell`, `uid`, `gid` | | As for `spawn()` |
 
 ```javascript

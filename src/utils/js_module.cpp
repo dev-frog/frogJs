@@ -41,3 +41,28 @@ void SetFunction(Isolate* isolate, Local<Context> context, Local<Object> target,
 }
 
 }  // namespace frogjs
+
+namespace frogjs {
+
+Local<Object> RegisteredBuiltins(Isolate* isolate, Local<Context> context) {
+    Local<Private> key = Private::ForApi(isolate, String::NewFromUtf8Literal(isolate, "frogjs:builtins"));
+    Local<Object> global = context->Global();
+    Local<Value> value;
+    if (global->GetPrivate(context, key).ToLocal(&value) && value->IsObject()) return value.As<Object>();
+    Local<Object> table = Object::New(isolate);
+    global->SetPrivate(context, key, table).Check();
+    return table;
+}
+
+void RegisterBuiltin(Isolate* isolate, Local<Context> context, const char* name, Local<Value> value) {
+    RegisteredBuiltins(isolate, context)->Set(context, String::NewFromUtf8(isolate, name).ToLocalChecked(), value).Check();
+}
+
+Local<Value> GetBuiltin(Isolate* isolate, Local<Context> context, const char* name) {
+    Local<String> key = String::NewFromUtf8(isolate, name).ToLocalChecked();
+    Local<Object> table = RegisteredBuiltins(isolate, context);
+    if (table->HasOwnProperty(context, key).FromMaybe(false)) return table->Get(context, key).ToLocalChecked();
+    return context->Global()->Get(context, key).ToLocalChecked();
+}
+
+}  // namespace frogjs

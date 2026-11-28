@@ -1,6 +1,6 @@
 # FrogJS Development Roadmap
 
-## 📊 Current Status: Version 1.0.0
+## 📊 Current Status: Version 1.1.0
 
 ### ✅ Completed (v0.1.0)
 - Core V8 runtime integration
@@ -70,6 +70,10 @@
 ### ✅ Completed (v1.0.0)
 - See [Version 1.0.0](#version-100---stable-release) below and the [changelog](CHANGELOG.md)
 - Breaking, to match Node.js before the API is frozen: `fs` contents and errors, `net` sockets as streams, `Buffer` as a `Uint8Array`, timers as objects, uncaught callback errors and rejections ending the process
+
+### ✅ Completed (v1.1.0)
+- ES modules, web globals, `assert`, `readline`, `url`, `querystring`, `string_decoder`, `tty`, REPL top-level `await` and `.editor`: see [Version 1.1.0](#version-110---run-real-npm-code) and the [changelog](CHANGELOG.md)
+- Not done: the benchmark goal (see Performance under 1.1.0)
 
 ---
 
@@ -520,32 +524,32 @@ Every 1.x release is additive: no API that 1.0 has changes or goes away. See the
 **Theme:** most modern npm packages load and run unchanged.
 
 #### ES Modules
-- [ ] `import`/`export`, `.mjs`, and `"type": "module"` in `package.json`
-- [ ] Dynamic `import()` from both CommonJS and ESM
-- [ ] `import.meta.url`, `import.meta.dirname`, `import.meta.filename`
-- [ ] `package.json` `exports` conditions: `import`, `require`, `default`
-- [ ] Interop: importing CommonJS gives `module.exports` as the default export; `require()` of ESM throws `ERR_REQUIRE_ESM`, as in Node.js
-- [ ] `node:` builtins importable as ES modules
-- [ ] Top-level `await` in ES modules
+- [x] `import`/`export`, `.mjs`, and `"type": "module"` in `package.json`
+- [x] Dynamic `import()` from both CommonJS and ESM
+- [x] `import.meta.url`, `import.meta.dirname`, `import.meta.filename`
+- [x] `package.json` `exports` conditions: `import`, `require`, `default`
+- [x] Interop: importing CommonJS gives `module.exports` as the default export. `require()` of ESM works, as in Node.js 22 and later (the plan said `ERR_REQUIRE_ESM`, which Node.js has since dropped); only modules with top-level `await` throw `ERR_REQUIRE_ASYNC_MODULE`
+- [x] `node:` builtins importable as ES modules
+- [x] Top-level `await` in ES modules
 
 **Implementation Notes:**
 - Built on V8's `v8::Module` API (`CompileModule`, `InstantiateModule`, `ResolveModuleCallback`, and `HostImportModuleDynamicallyCallback` for `import()`), next to the CommonJS loader in `src/bindings/modules.cpp`. Resolution reuses the existing `node_modules` and `exports` logic.
 
 #### Web Globals
-- [ ] `URL` and `URLSearchParams` (WHATWG URL Standard), and the `url` module (`fileURLToPath`, `pathToFileURL`)
-- [ ] `EventTarget` and `Event`
-- [ ] `AbortController` and `AbortSignal` (`abort()`, `timeout()`, `any()`), accepted as `signal` by timers' promises, `fs.promises`, `child_process` and `events.once`
-- [ ] `atob` and `btoa`
+- [x] `URL` and `URLSearchParams` (WHATWG URL Standard), and the `url` module (`fileURLToPath`, `pathToFileURL`)
+- [x] `EventTarget` and `Event`
+- [x] `AbortController` and `AbortSignal` (`abort()`, `timeout()`, `any()`), accepted as `signal` by timers' promises, `fs.promises`, `child_process` and `events.once`
+- [x] `atob` and `btoa`
 
 #### Small Modules
-- [ ] `assert` and `assert/strict` (`deepStrictEqual` with the same error messages as Node.js)
-- [ ] `readline` and `readline/promises` (built on the REPL's existing `line_editor`)
-- [ ] `string_decoder` and `querystring`
-- [ ] `util.parseArgs`, `util.styleText`
+- [x] `assert` and `assert/strict` (`deepStrictEqual` with the same error messages as Node.js)
+- [x] `readline` and `readline/promises` (built on the REPL's existing `line_editor`)
+- [x] `string_decoder` and `querystring`
+- [x] `util.parseArgs`, `util.styleText`
 
 #### REPL
-- [ ] Top-level `await`
-- [ ] `.editor` mode
+- [x] Top-level `await`
+- [x] `.editor` mode
 
 #### Performance
 Bring the benchmarks still over 2x of Node.js under it (see [performance](docs/performance.md)):
@@ -590,7 +594,7 @@ Record the choice and the reasons in [architecture](docs/architecture.md) before
 
 #### Crypto (free once a TLS library is linked)
 - [ ] `createCipheriv`/`createDecipheriv` with AES-GCM and AES-CBC
-- [ ] `scrypt`, `hkdf`, `randomFill`/`randomFillSync`
+- [ ] `scrypt`, `hkdf` (`randomFill`/`randomFillSync` came in 1.1)
 - [ ] `KeyObject`, `generateKeyPair`, `sign`/`verify`
 - [ ] Web Crypto `crypto.subtle` (later in 1.2 if it doesn't fit)
 

@@ -9,9 +9,14 @@ declare module 'events' {
         /** Listen with this to see 'error' events without handling them. */
         static readonly errorMonitor: unique symbol;
         /** Resolve with the arguments of the next `event` (reject on 'error'). */
-        static once(emitter: EventEmitter, event: string | symbol): Promise<any[]>;
-        /** Iterate over the arguments of every `event`. */
-        static on(emitter: EventEmitter, event: string | symbol): AsyncIterableIterator<any[]>;
+        static once(emitter: EventEmitter | EventTarget, event: string | symbol, options?: { signal?: AbortSignal }): Promise<any[]>;
+        /** Iterate over the arguments of every `event`. Aborting `signal` ends the loop with an AbortError. */
+        static on(emitter: EventEmitter | EventTarget, event: string | symbol, options?: { signal?: AbortSignal }): AsyncIterableIterator<any[]>;
+        /** Call `listener` once when `signal` aborts, even if the abort event was stopped. Calling `result[Symbol.dispose]()` removes it. */
+        static addAbortListener(signal: AbortSignal, listener: (event: Event) => void): { [dispose: symbol]: () => void };
+        /** Set the listener limit of each target (all new EventEmitters when there are none). */
+        static setMaxListeners(n?: number, ...targets: Array<EventEmitter | EventTarget>): void;
+        static getMaxListeners(emitter: EventEmitter | EventTarget): number;
         static listenerCount(emitter: EventEmitter, event: string | symbol): number;
         static getEventListeners(emitter: EventEmitter, event: string | symbol): Function[];
 

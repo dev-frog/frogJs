@@ -1,6 +1,6 @@
 # FrogJS type definitions
 
-TypeScript declarations for the FrogJS globals (`console`, `process`, `Buffer`, timers, `require`, `__dirname`, ...) and its built-in modules: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`, `child_process`, `worker_threads`, `buffer`.
+TypeScript declarations for the FrogJS globals (`console`, `process`, `Buffer`, timers, `require`, `__dirname`, ...) the web globals (`URL`, `AbortController`, `EventTarget`, ...), and every built-in module: `fs`, `net`, `http`, `path`, `os`, `events`, `stream`, `util`, `crypto`, `child_process`, `worker_threads`, `buffer`, `url`, `querystring`, `string_decoder`, `assert`, `readline`, `tty`, `timers`, `process`, `module` and their subpaths (`fs/promises`, `timers/promises`, ...).
 
 They describe what FrogJS implements, not all of Node.js: an API FrogJS lacks isn't declared, so the compiler catches code that would fail at run time.
 
@@ -33,7 +33,7 @@ const config: string = fs.readFileSync('config.json', 'utf8');
 spawn('ls', ['-l']).stdout.pipe(process.stdout);
 ```
 
-Run the result with `frogjs dist/main.js`. FrogJS has no ES modules (`import ... from` compiled to CommonJS works, native `import` doesn't).
+Run the result with `frogjs dist/main.js`. The declarations are written as CommonJS modules (`import x = require('x')`); FrogJS also runs native ES modules, so `"module": "NodeNext"` output works too.
 
 ## Keeping them correct
 

@@ -91,6 +91,7 @@ bool ParseEncoding(const std::string& name, Encoding* encoding) {
     else if (lower == "base64url") *encoding = Encoding::kBase64Url;
     else if (lower == "latin1" || lower == "binary") *encoding = Encoding::kLatin1;
     else if (lower == "ascii") *encoding = Encoding::kAscii;
+    else if (lower == "utf16le" || lower == "utf-16le" || lower == "ucs2" || lower == "ucs-2") *encoding = Encoding::kUtf16le;
     else return false;
     return true;
 }
@@ -170,6 +171,16 @@ std::string DecodeString(Isolate* isolate, Local<String> str, Encoding encoding)
             out.resize(MaxDecodedLength(length, encoding));
             out.resize(DecodeInto(isolate, str, encoding, out.empty() ? nullptr : &out[0]));
             break;
+        case Encoding::kUtf16le: {
+            // Each UTF-16 code unit, lone surrogates included, little-endian
+            std::vector<uint16_t> units = CodeUnits(isolate, str);
+            out.resize(units.size() * 2);
+            for (size_t i = 0; i < units.size(); i++) {
+                out[i * 2] = static_cast<char>(units[i] & 0xFF);
+                out[i * 2 + 1] = static_cast<char>(units[i] >> 8);
+            }
+            break;
+        }
     }
     return out;
 }
@@ -250,6 +261,19 @@ MaybeLocal<String> EncodeBytes(Isolate* isolate, const char* data, size_t length
             if (length > max / 4 * 3) return ThrowStringTooLong(isolate);
             out = Base64Encode(bytes, length, encoding == Encoding::kBase64Url);
             break;
+        case Encoding::kUtf16le: {
+            // Pairs of bytes; an odd last byte is dropped, as in Node.js
+            size_t units_length = length / 2;
+            if (units_length > max) return ThrowStringTooLong(isolate);
+            std::vector<uint16_t> units(units_length);
+            for (size_t i = 0; i < units_length; i++) {
+                units[i] = static_cast<uint16_t>(bytes[i * 2] | (bytes[i * 2 + 1] << 8));
+            }
+            if (String::NewFromTwoByte(isolate, units.data(), NewStringType::kNormal, static_cast<int>(units_length)).ToLocal(&result)) {
+                return result;
+            }
+            return ThrowStringTooLong(isolate);
+        }
     }
     if (String::NewFromOneByte(isolate, reinterpret_cast<const uint8_t*>(out.data()), NewStringType::kNormal,
             static_cast<int>(out.size())).ToLocal(&result)) {

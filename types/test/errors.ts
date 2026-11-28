@@ -6,8 +6,20 @@ import { spawn } from 'child_process';
 import { Worker } from 'worker_threads';
 import crypto = require('crypto');
 import net = require('net');
+import readlinePromises = require('readline/promises');
+import url = require('url');
 
 export function mistakes(): void {
+    // @ts-expect-error  URL needs an input
+    new URL();
+    // @ts-expect-error  searchParams.get returns string | null
+    const value: string = new URL('http://a').searchParams.get('x');
+    // @ts-expect-error  AbortSignal.aborted is read-only
+    new AbortController().signal.aborted = true;
+    // @ts-expect-error  the promise form of question() takes no callback
+    readlinePromises.createInterface({ input: process.stdin }).question('?', () => {});
+    // @ts-expect-error  url.parse() without parseQueryString leaves query a string
+    const query: string = url.parse('http://a/?b=1').query.b;
     // @ts-expect-error  Stats.isDirectory is a method, not a boolean
     const isDirectory: boolean = fs.statSync('.').isDirectory;
     // @ts-expect-error  fs errors have no .nope

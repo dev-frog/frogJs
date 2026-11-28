@@ -9,6 +9,8 @@ declare namespace FrogJS {
     };
 
     interface ProcessVersions {
+        /** The Node.js version whose API FrogJS follows, e.g. `'24.3.0'`. */
+        node: string;
         frogjs: string;
         v8: string;
         uv: string;
@@ -37,7 +39,7 @@ declare namespace FrogJS {
         readonly platform: string;
         /** `'arm64'`, `'x64'`, ... */
         readonly arch: string;
-        /** `'v1.0.0'` */
+        /** The Node.js version whose API FrogJS follows, e.g. `'v24.3.0'`, so packages that check it work. The FrogJS version is `versions.frogjs`. */
         readonly version: string;
         readonly versions: ProcessVersions;
         readonly release: { name: string };
@@ -197,3 +199,7 @@ declare var util: typeof import('util');
 declare var crypto: typeof import('crypto');
 declare var child_process: typeof import('child_process');
 declare var worker_threads: typeof import('worker_threads');
+
+// For modules that export the same classes ('util')
+type FrogJSTextEncoderClass = typeof TextEncoder;
+type FrogJSTextDecoderClass = typeof TextDecoder;

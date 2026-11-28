@@ -2,6 +2,35 @@
 
 FrogJS follows [Semantic Versioning](https://semver.org). See the [API stability policy](docs/api-stability.md).
 
+## 1.1.0
+
+Most modern npm packages now load and run unchanged: ES modules, the web globals they expect (`URL`, `AbortController`, `EventTarget`, ...), and the small modules that were missing. New code was tested under both FrogJS and Node.js 24, with the same results.
+
+### Changed
+
+- **`process.version` is the Node.js version FrogJS follows** (`'v24.3.0'`), not the FrogJS version, and `process.versions.node` is new. Packages check it: yargs refused to run on "Node.js v1.0.0". The FrogJS version is still `process.versions.frogjs` and `frogjs --version`. Code that read the FrogJS version from `process.version` should read `process.versions.frogjs`.
+
+### Added
+
+- **ES modules**: `import`/`export`, `.mjs` and `.cjs`, `"type": "module"`, and `.js` files run as modules when only their syntax says so (also for `-e` and stdin). `import()`, `import.meta` (`url`, `filename`, `dirname`, `resolve`), JSON imports with `with { type: 'json' }`, `data:` URLs, named exports from CommonJS, and `require()` of ES modules (`ERR_REQUIRE_ASYNC_MODULE` for ones with top-level `await`). Top-level `await`; a main module stuck on it exits with code 13, as in Node.js. See [ES Modules](docs/api-reference.md#es-modules).
+- **Packages**: `exports` and `imports` with nested conditions and `*` patterns, for both `require()` and `import`. Checked with chalk, nanoid, lodash-es, date-fns, uuid, zod, commander, dayjs, immer and yargs (16 and 17).
+- **`URL` and `URLSearchParams`** as globals and in the new `url` module, which also has `fileURLToPath`, `pathToFileURL`, `domainToASCII`, `domainToUnicode`, `urlToHttpOptions` and the legacy `parse`, `format` and `resolve`. It passes every web-platform-tests URL case that Node.js passes (3,085, against Node.js's 3,077).
+- **Web globals**: `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal` (`abort()`, `timeout()`, `any()`), `DOMException`, `atob` and `btoa`. A `signal` option is accepted by `events.once()`, `events.on()`, `timers/promises`, `fs.readFile()`/`writeFile()` (and `fs.promises`), `child_process.spawn()`/`exec()`/`execFile()` and `readline`.
+- **New modules**: `assert` and `assert/strict` (with Node.js's messages and diffs), `readline` and `readline/promises`, `querystring`, `string_decoder`, `tty`, `timers/promises`, and the aliases `fs/promises`, `stream/promises`, `path/posix` and `perf_hooks`.
+- `util`: `parseArgs`, `styleText`, `types`, `callbackify`, `deprecate`, `debuglog`/`debug`, `getSystemErrorName`, `toUSVString`, `isArray`, `TextEncoder`, `TextDecoder`.
+- `events`: `addAbortListener`, `setMaxListeners`, `getMaxListeners`; `once()` and `on()` accept an `EventTarget`.
+- `crypto`: `randomFill`, `randomFillSync`, and `webcrypto` (`getRandomValues` and `randomUUID`; no `subtle` yet).
+- `module.isBuiltin()`.
+- REPL: top-level `await`, and `.editor` mode.
+- TypeScript declarations for all of the above. `make check-types` now also fails when FrogJS has a built-in module, export or global that `types/` doesn't declare.
+
+### Fixed
+
+- `util.isDeepStrictEqual` (and so `assert.deepStrictEqual`) treated Maps, Sets, Dates and RegExps with different contents as equal.
+- `Buffer` had no UTF-16LE encoding (`'utf16le'`, `'ucs2'`).
+- Error subclasses were printed as `Error:` instead of their own name.
+- `util.inspect` and `stripVTControlCharacters` only recognized color codes, not other ANSI escape sequences.
+
 ## 1.0.0
 
 The first stable release. It fixes the API by matching Node.js in the places FrogJS differed, so these breaking changes don't have to happen later. If you are coming from 0.9, read [Migrating](#migrating-from-09).
